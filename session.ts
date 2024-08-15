@@ -28,7 +28,6 @@ export class Transcript {
     readonly text: string,
     readonly isFinal: boolean,
     readonly speaker: Role,
-    readonly delta?: string,
   ) {}
 }
 
@@ -50,6 +49,7 @@ export class UltravoxSessionStatusChangedEvent extends UltravoxSessionStateChang
     super('ultravoxSessionStatusChanged', state, transcripts);
   }
 }
+
 export class UltravoxTranscriptsChangedEvent extends UltravoxSessionStateChangeEvent {
   constructor(
     readonly state: UltravoxSessionStatus,
@@ -60,7 +60,7 @@ export class UltravoxTranscriptsChangedEvent extends UltravoxSessionStateChangeE
 }
 
 export class UltravoxSessionState extends EventTarget {
-  private transcripts: Transcript[] = [];
+  private readonly transcripts: Transcript[] = [];
   private status: UltravoxSessionStatus = UltravoxSessionStatus.DISCONNECTED;
 
   constructor() {
@@ -81,7 +81,7 @@ export class UltravoxSessionState extends EventTarget {
   }
 
   addOrUpdateTranscript(transcript: Transcript) {
-    if (this.transcripts && this.transcripts.length > 0) {
+    if (this.transcripts.length) {
       const lastTranscript = this.transcripts[this.transcripts.length - 1];
       if (!lastTranscript.isFinal && transcript.speaker === lastTranscript.speaker) {
         this.transcripts[this.transcripts.length - 1] = transcript;
@@ -89,7 +89,7 @@ export class UltravoxSessionState extends EventTarget {
         this.transcripts.push(transcript);
       }
     } else {
-      this.transcripts = [transcript];
+      this.transcripts.push(transcript);
     }
     this.dispatchEvent(new UltravoxTranscriptsChangedEvent(this.status, this.transcripts));
   }
@@ -207,20 +207,15 @@ export class UltravoxSession {
     } else if (msg.type === 'transcript') {
       const transcript = new Transcript(msg.transcript.text, msg.transcript.final, Role.USER);
       this.state.addOrUpdateTranscript(transcript);
-    } 
-    // Agent messages are sent as deltas to enable displaying them with audio.
-    else if (msg.type === 'voice_synced_transcript') {
-      let newTranscript: Transcript;
+    } else if (msg.type === 'voice_synced_transcript') {
       if (msg.text != null) {
-        newTranscript = new Transcript(msg.text, msg.final, Role.AGENT);
+        const newTranscript = new Transcript(msg.text, msg.final, Role.AGENT);
         this.state.addOrUpdateTranscript(newTranscript);
       } else if (msg.delta != null) {
-        const currentTranscripts = this.state.getTranscripts();
-        const lastMessage = currentTranscripts[currentTranscripts.length - 1];
-        if (lastMessage.speaker != Role.AGENT) {
-          console.log('Unexpected delta message!');
-        } else {
-          newTranscript = new Transcript(lastMessage.text + msg.delta, msg.final, Role.AGENT);
+        const transcripts = this.state.getTranscripts();
+        const lastTranscript = transcripts.length ? transcripts[currentTranscripts.length - 1] : undefined;
+        if (lastTranscript && lastTranscript.speaker == Role.AGENT) {
+          const newTranscript = new Transcript(lastTranscript.text + msg.delta, msg.final, Role.AGENT);
           this.state.addOrUpdateTranscript(newTranscript);
         }
       }
