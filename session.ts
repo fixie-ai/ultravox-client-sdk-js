@@ -213,7 +213,7 @@ export class UltravoxSession {
         this.state.addOrUpdateTranscript(newTranscript);
       } else if (msg.delta != null) {
         const transcripts = this.state.getTranscripts();
-        const lastTranscript = transcripts.length ? transcripts[currentTranscripts.length - 1] : undefined;
+        const lastTranscript = transcripts.length ? transcripts[transcripts.length - 1] : undefined;
         if (lastTranscript && lastTranscript.speaker == Role.AGENT) {
           const newTranscript = new Transcript(lastTranscript.text + msg.delta, msg.final, Role.AGENT);
           this.state.addOrUpdateTranscript(newTranscript);
