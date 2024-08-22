@@ -83,7 +83,7 @@ export class UltravoxSessionState extends EventTarget {
   addOrUpdateTranscript(transcript: Transcript) {
     if (this.transcripts.length) {
       const lastTranscript = this.transcripts[this.transcripts.length - 1];
-      if (!lastTranscript.isFinal && transcript.speaker === lastTranscript.speaker) {
+      if (lastTranscript && !lastTranscript.isFinal && transcript.speaker === lastTranscript.speaker) {
         this.transcripts[this.transcripts.length - 1] = transcript;
       } else {
         this.transcripts.push(transcript);
