@@ -81,8 +81,13 @@ export class UltravoxSessionState extends EventTarget {
   }
 
   addOrUpdateTranscript(transcript: Transcript) {
-    if (this.transcripts && !this.transcripts[-1].isFinal && transcript.speaker === this.transcripts[-1].speaker) {
-      this.transcripts[-1] = transcript;
+    if (this.transcripts.length) {
+      const lastTranscript = this.transcripts[this.transcripts.length - 1];
+      if (lastTranscript && !lastTranscript.isFinal && transcript.speaker === lastTranscript.speaker) {
+        this.transcripts[this.transcripts.length - 1] = transcript;
+      } else {
+        this.transcripts.push(transcript);
+      }
     } else {
       this.transcripts.push(transcript);
     }
@@ -171,6 +176,8 @@ export class UltravoxSession {
     this.micSourceNode = undefined;
     this.agentSourceNode?.disconnect();
     this.agentSourceNode = undefined;
+    this.audioElement.pause();
+    this.audioElement.srcObject = null;
     this.state.setStatus(UltravoxSessionStatus.DISCONNECTED);
   }
 
@@ -201,8 +208,17 @@ export class UltravoxSession {
       const transcript = new Transcript(msg.transcript.text, msg.transcript.final, Role.USER);
       this.state.addOrUpdateTranscript(transcript);
     } else if (msg.type === 'voice_synced_transcript') {
-      const transcript = new Transcript(msg.text, msg.final, Role.AGENT);
-      this.state.addOrUpdateTranscript(transcript);
+      if (msg.text != null) {
+        const newTranscript = new Transcript(msg.text, msg.final, Role.AGENT);
+        this.state.addOrUpdateTranscript(newTranscript);
+      } else if (msg.delta != null) {
+        const transcripts = this.state.getTranscripts();
+        const lastTranscript = transcripts.length ? transcripts[transcripts.length - 1] : undefined;
+        if (lastTranscript && lastTranscript.speaker == Role.AGENT) {
+          const newTranscript = new Transcript(lastTranscript.text + msg.delta, msg.final, Role.AGENT);
+          this.state.addOrUpdateTranscript(newTranscript);
+        }
+      }
     }
   }
 }

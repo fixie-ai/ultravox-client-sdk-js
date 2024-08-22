@@ -1,8 +1,20 @@
 {
   "name": "ultravox-client",
-  "version": "0.1.0",
+  "version": "0.2.9",
   "private": false,
+  "files": [
+    "dist"
+  ],
+  "tshy": {
+    "dialects": [
+      "esm"
+    ],
+    "exports": {
+      "./package.json": "./package.json"
+    }
+  },
   "scripts": {
+    "prepare": "tshy",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -10,8 +22,10 @@
     "livekit-client": "^2.0.10"
   },
   "devDependencies": {
-    "typescript": "^5.1.3",
-    "prettier": "^3.3.3"
+    "@types/node": "^22.1.0",
+    "prettier": "^3.3.3",
+    "tshy": "^3.0.2",
+    "typescript": "^5.1.3"
   },
   "prettier": {
     "printWidth": 120,
@@ -19,5 +33,9 @@
   },
   "engines": {
     "pnpm": ">=6.0.0"
+  },
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json"
   }
 }
