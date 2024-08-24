@@ -17,7 +17,7 @@
     "build": "pnpm run tshy && pnpm run format",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "tshy": "tshy"
+    "prepare": "tshy"
   },
   "dependencies": {
     "livekit-client": "^2.0.10"
