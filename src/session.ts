@@ -23,11 +23,17 @@ export enum Role {
   AGENT = 'agent',
 }
 
+export enum Medium {
+  VOICE = 'voice',
+  TEXT = 'text',
+}
+
 export class Transcript {
   constructor(
     readonly text: string,
     readonly isFinal: boolean,
     readonly speaker: Role,
+    readonly medium: Medium = Medium.TEXT,
   ) {}
 }
 
@@ -96,6 +102,12 @@ export class UltravoxSessionState extends EventTarget {
 }
 
 export class UltravoxSession {
+  private static CONNECTED_STATUSES = new Set([
+    UltravoxSessionStatus.LISTENING,
+    UltravoxSessionStatus.THINKING,
+    UltravoxSessionStatus.SPEAKING,
+  ]);
+
   private readonly state = new UltravoxSessionState();
   private socket?: WebSocket;
   private room?: Room;
@@ -105,6 +117,7 @@ export class UltravoxSession {
   private agentSourceNode?: MediaStreamAudioSourceNode;
   private delayedSpeakingState = false;
   private readonly textDecoder = new TextDecoder();
+  private readonly textEncoder = new TextEncoder();
 
   constructor(readonly audioContext: AudioContext = new AudioContext()) {}
 
@@ -121,6 +134,16 @@ export class UltravoxSession {
 
   async leaveCall(): Promise<void> {
     await this.disconnect();
+  }
+
+  sendText(text: string) {
+    const status = this.state.getStatus();
+    if (!UltravoxSession.CONNECTED_STATUSES.has(status)) {
+      throw new Error(`Cannot send text while not connected. Current status is ${status}.`);
+    }
+    const transcript = new Transcript(text, true, Role.USER, Medium.TEXT);
+    this.sendData({ type: 'input_text_message', text });
+    this.state.addOrUpdateTranscript(transcript);
   }
 
   private async handleSocketMessage(event: MessageEvent) {
@@ -193,6 +216,10 @@ export class UltravoxSession {
     }
   }
 
+  private sendData(obj: any) {
+    this.room?.localParticipant.publishData(this.textEncoder.encode(JSON.stringify(obj)), { reliable: true });
+  }
+
   private handleDataReceived(payload: Uint8Array, _participant: any) {
     const msg = JSON.parse(this.textDecoder.decode(payload));
     if (msg.type === 'state') {
@@ -207,15 +234,16 @@ export class UltravoxSession {
     } else if (msg.type === 'transcript') {
       const transcript = new Transcript(msg.transcript.text, msg.transcript.final, Role.USER);
       this.state.addOrUpdateTranscript(transcript);
-    } else if (msg.type === 'voice_synced_transcript') {
+    } else if (msg.type === 'voice_synced_transcript' || msg.type == 'agent_text_transcript') {
+      const medium = msg.type == 'agent_text_transcript' ? Medium.TEXT : Medium.VOICE;
       if (msg.text != null) {
-        const newTranscript = new Transcript(msg.text, msg.final, Role.AGENT);
+        const newTranscript = new Transcript(msg.text, msg.final, Role.AGENT, medium);
         this.state.addOrUpdateTranscript(newTranscript);
       } else if (msg.delta != null) {
         const transcripts = this.state.getTranscripts();
         const lastTranscript = transcripts.length ? transcripts[transcripts.length - 1] : undefined;
         if (lastTranscript && lastTranscript.speaker == Role.AGENT) {
-          const newTranscript = new Transcript(lastTranscript.text + msg.delta, msg.final, Role.AGENT);
+          const newTranscript = new Transcript(lastTranscript.text + msg.delta, msg.final, Role.AGENT, medium);
           this.state.addOrUpdateTranscript(newTranscript);
         }
       }
