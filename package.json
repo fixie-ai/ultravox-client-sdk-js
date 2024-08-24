@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "build": "pnpm run tshy && pnpm run format",
+    "build": "pnpm run prepare && pnpm run format",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "tshy"
