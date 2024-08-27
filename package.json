@@ -1,6 +1,6 @@
 {
   "name": "ultravox-client",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "private": false,
   "files": [
     "dist"
@@ -10,6 +10,12 @@
       "esm"
     ],
     "exports": {
+      ".": {
+        "import": {
+          "types": "./dist/esm/session.d.ts",
+          "default": "./dist/esm/session.js"
+        }
+      },
       "./package.json": "./package.json"
     }
   },
@@ -36,6 +42,13 @@
   },
   "type": "module",
   "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/session.d.ts",
+        "default": "./dist/esm/session.js"
+      }
+    },
     "./package.json": "./package.json"
-  }
+  },
+  "module": "./dist/esm/session.js"
 }
