@@ -28,6 +28,7 @@ state.addEventListener('ultravoxSessionStatusChanged', (event) => {
 
 state.addEventListener('ultravoxTranscriptsChanged', (event) => {
   console.log('Transcripts updated: ', event.transcripts);
+  console.log('Current session status: ', event.state); // Session status is also available on the event
 });
 ```
 
@@ -48,9 +49,8 @@ speaking
 
 Transcripts are an array of transcript objects. Each transcript has the following properties:
 
-| property | type    | definition                                                                                                                         |
-| -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| text     | string  | Text transcript of the speech from the end user or the agent.                                                                      |
-| isFinal  | boolean | True if the transcript represents a complete utterance. False if it is a fragment of an utterance that is still underway.          |
-| speaker  | Role    | Either "user" or "agent". Denotes who was speaking.                                                                                |
-| delta    | string  | Optional. If present, represents what was new in this fragment. Can be used to display transcripts in real-time along with speech. |
+| property | type    | definition                                                                                                                |
+| -------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| text     | string  | Text transcript of the speech from the end user or the agent.                                                             |
+| isFinal  | boolean | True if the transcript represents a complete utterance. False if it is a fragment of an utterance that is still underway. |
+| speaker  | Role    | Either "user" or "agent". Denotes who was speaking.                                                                       |
