@@ -33,7 +33,7 @@ export class Transcript {
     readonly text: string,
     readonly isFinal: boolean,
     readonly speaker: Role,
-    readonly medium: Medium = Medium.TEXT,
+    readonly medium: Medium,
   ) {}
 }
 
@@ -141,9 +141,7 @@ export class UltravoxSession {
     if (!UltravoxSession.CONNECTED_STATUSES.has(status)) {
       throw new Error(`Cannot send text while not connected. Current status is ${status}.`);
     }
-    const transcript = new Transcript(text, true, Role.USER, Medium.TEXT);
     this.sendData({ type: 'input_text_message', text });
-    this.state.addOrUpdateTranscript(transcript);
   }
 
   private async handleSocketMessage(event: MessageEvent) {
@@ -232,7 +230,8 @@ export class UltravoxSession {
         this.state.setStatus(newState);
       }
     } else if (msg.type === 'transcript') {
-      const transcript = new Transcript(msg.transcript.text, msg.transcript.final, Role.USER);
+      const medium = msg.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
+      const transcript = new Transcript(msg.transcript.text, msg.transcript.final, Role.USER, medium);
       this.state.addOrUpdateTranscript(transcript);
     } else if (msg.type === 'voice_synced_transcript' || msg.type == 'agent_text_transcript') {
       const medium = msg.type == 'agent_text_transcript' ? Medium.TEXT : Medium.VOICE;
