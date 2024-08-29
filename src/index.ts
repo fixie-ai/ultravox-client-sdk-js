@@ -175,6 +175,7 @@ export class UltravoxSession {
     );
     const [track, _] = await Promise.all([createLocalAudioTrack(), this.room.connect(msg.roomUrl, msg.token)]);
     this.localAudioTrack = track;
+    this.localAudioTrack.setAudioContext(this.audioContext);
 
     if ([UltravoxSessionStatus.DISCONNECTED, UltravoxSessionStatus.DISCONNECTING].includes(this.state.getStatus())) {
       // We've been stopped while waiting for the mic permission (during createLocalTracks).
