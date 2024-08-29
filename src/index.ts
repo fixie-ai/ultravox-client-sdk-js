@@ -65,6 +65,12 @@ export class UltravoxTranscriptsChangedEvent extends UltravoxSessionStateChangeE
   }
 }
 
+export class UltravoxExperimentalMessageEvent extends Event {
+  constructor(readonly message: any) {
+    super('ultravoxExperimentalMessage');
+  }
+}
+
 export class UltravoxSessionState extends EventTarget {
   private readonly transcripts: Transcript[] = [];
   private status: UltravoxSessionStatus = UltravoxSessionStatus.DISCONNECTED;
@@ -119,11 +125,19 @@ export class UltravoxSession {
   private readonly textDecoder = new TextDecoder();
   private readonly textEncoder = new TextEncoder();
 
-  constructor(readonly audioContext: AudioContext = new AudioContext()) {}
+  constructor(
+    readonly audioContext: AudioContext = new AudioContext(),
+    readonly experimental: boolean = false,
+  ) {}
 
   joinCall(joinUrl: string): UltravoxSessionState {
     if (this.state.getStatus() !== UltravoxSessionStatus.DISCONNECTED) {
       throw new Error('Cannot join a new call while already in a call');
+    }
+    if (this.experimental) {
+      const url = new URL(joinUrl);
+      url.searchParams.set('experimentalMessages', 'true');
+      joinUrl = url.toString();
     }
     this.state.setStatus(UltravoxSessionStatus.CONNECTING);
     this.socket = new WebSocket(joinUrl);
@@ -246,6 +260,8 @@ export class UltravoxSession {
           this.state.addOrUpdateTranscript(newTranscript);
         }
       }
+    } else if (this.experimental) {
+      this.state.dispatchEvent(new UltravoxExperimentalMessageEvent(msg));
     }
   }
 }
