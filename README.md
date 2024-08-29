@@ -54,4 +54,4 @@ Transcripts are an array of transcript objects. Each transcript has the followin
 | text     | string  | Text transcript of the speech from the end user or the agent.                                                             |
 | isFinal  | boolean | True if the transcript represents a complete utterance. False if it is a fragment of an utterance that is still underway. |
 | speaker  | Role    | Either "user" or "agent". Denotes who was speaking.                                                                       |
-| medium   | Medium  | Either "voice" or "text". Denotes how the message was sent.                                                                           |
+| medium   | Medium  | Either "voice" or "text". Denotes how the message was sent.                                                               |
