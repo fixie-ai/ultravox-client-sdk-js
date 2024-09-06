@@ -125,18 +125,27 @@ export class UltravoxSession {
   private readonly textDecoder = new TextDecoder();
   private readonly textEncoder = new TextEncoder();
 
-  constructor(
-    readonly audioContext: AudioContext = new AudioContext(),
-    readonly experimental: boolean = false,
-  ) {}
+  private readonly audioContext: AudioContext;
+  private readonly experimentalMessages: Set<string>;
+
+  constructor({
+    audioContext,
+    experimentalMessages,
+  }: {
+    audioContext?: AudioContext;
+    experimentalMessages?: Set<string>;
+  } = {}) {
+    this.audioContext = audioContext || new AudioContext();
+    this.experimentalMessages = experimentalMessages || new Set();
+  }
 
   joinCall(joinUrl: string): UltravoxSessionState {
     if (this.state.getStatus() !== UltravoxSessionStatus.DISCONNECTED) {
       throw new Error('Cannot join a new call while already in a call');
     }
-    if (this.experimental) {
+    if (this.experimentalMessages) {
       const url = new URL(joinUrl);
-      url.searchParams.set('experimentalMessages', 'true');
+      url.searchParams.set('experimentalMessages', Array.from(this.experimentalMessages.values()).join(','));
       joinUrl = url.toString();
     }
     this.state.setStatus(UltravoxSessionStatus.CONNECTING);
@@ -175,6 +184,7 @@ export class UltravoxSession {
     );
     const [track, _] = await Promise.all([createLocalAudioTrack(), this.room.connect(msg.roomUrl, msg.token)]);
     this.localAudioTrack = track;
+    this.localAudioTrack.setAudioContext(this.audioContext);
 
     if ([UltravoxSessionStatus.DISCONNECTED, UltravoxSessionStatus.DISCONNECTING].includes(this.state.getStatus())) {
       // We've been stopped while waiting for the mic permission (during createLocalTracks).
@@ -244,7 +254,7 @@ export class UltravoxSession {
         this.state.setStatus(newState);
       }
     } else if (msg.type === 'transcript') {
-      const medium = msg.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
+      const medium = msg.transcript.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
       const transcript = new Transcript(msg.transcript.text, msg.transcript.final, Role.USER, medium);
       this.state.addOrUpdateTranscript(transcript);
     } else if (msg.type === 'voice_synced_transcript' || msg.type == 'agent_text_transcript') {
@@ -260,7 +270,7 @@ export class UltravoxSession {
           this.state.addOrUpdateTranscript(newTranscript);
         }
       }
-    } else if (this.experimental) {
+    } else if (this.experimentalMessages) {
       this.state.dispatchEvent(new UltravoxExperimentalMessageEvent(msg));
     }
   }
