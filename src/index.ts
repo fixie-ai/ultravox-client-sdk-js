@@ -125,10 +125,19 @@ export class UltravoxSession {
   private readonly textDecoder = new TextDecoder();
   private readonly textEncoder = new TextEncoder();
 
-  constructor(
-    readonly audioContext: AudioContext = new AudioContext(),
-    readonly experimentalMessages: Set<String> = new Set<string>(),
-  ) {}
+  private readonly audioContext: AudioContext;
+  private readonly experimentalMessages: Set<string>;
+
+  constructor({
+    audioContext,
+    experimentalMessages,
+  }: {
+    audioContext?: AudioContext;
+    experimentalMessages?: Set<string>;
+  } = {}) {
+    this.audioContext = audioContext || new AudioContext();
+    this.experimentalMessages = experimentalMessages || new Set();
+  }
 
   joinCall(joinUrl: string): UltravoxSessionState {
     if (this.state.getStatus() !== UltravoxSessionStatus.DISCONNECTED) {
