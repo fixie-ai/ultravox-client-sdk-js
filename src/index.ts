@@ -127,16 +127,16 @@ export class UltravoxSession {
 
   constructor(
     readonly audioContext: AudioContext = new AudioContext(),
-    readonly experimental: boolean = false,
+    readonly experimentalMessages: Set<String> = new Set<string>(),
   ) {}
 
   joinCall(joinUrl: string): UltravoxSessionState {
     if (this.state.getStatus() !== UltravoxSessionStatus.DISCONNECTED) {
       throw new Error('Cannot join a new call while already in a call');
     }
-    if (this.experimental) {
+    if (this.experimentalMessages) {
       const url = new URL(joinUrl);
-      url.searchParams.set('experimentalMessages', 'true');
+      url.searchParams.set('experimentalMessages', Array.from(this.experimentalMessages.values()).join(','));
       joinUrl = url.toString();
     }
     this.state.setStatus(UltravoxSessionStatus.CONNECTING);
@@ -261,7 +261,7 @@ export class UltravoxSession {
           this.state.addOrUpdateTranscript(newTranscript);
         }
       }
-    } else if (this.experimental) {
+    } else if (this.experimentalMessages) {
       this.state.dispatchEvent(new UltravoxExperimentalMessageEvent(msg));
     }
   }
