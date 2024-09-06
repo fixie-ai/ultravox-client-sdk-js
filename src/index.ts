@@ -245,7 +245,7 @@ export class UltravoxSession {
         this.state.setStatus(newState);
       }
     } else if (msg.type === 'transcript') {
-      const medium = msg.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
+      const medium = msg.transcript.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
       const transcript = new Transcript(msg.transcript.text, msg.transcript.final, Role.USER, medium);
       this.state.addOrUpdateTranscript(transcript);
     } else if (msg.type === 'voice_synced_transcript' || msg.type == 'agent_text_transcript') {
