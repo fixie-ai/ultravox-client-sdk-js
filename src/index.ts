@@ -128,7 +128,7 @@ export class UltravoxSession {
   private readonly audioContext: AudioContext;
   private readonly experimentalMessages: Set<string>;
 
-  private isMuted = false;
+  private _isCallerMuted: boolean = false;
 
   constructor({
     audioContext,
@@ -169,35 +169,17 @@ export class UltravoxSession {
     this.sendData({ type: 'input_text_message', text });
   }
 
-  public mute(): void {
-    if (this.room && this.room.localParticipant) {
-      this.room.localParticipant.setMicrophoneEnabled(false);
-      this.isMuted = true;
-    } else {
-      console.warn('Cannot mute.');
-    }
+  get isCallerMuted(): boolean {
+    return this._isCallerMuted;
   }
 
-  public unmute(): void {
-    if (this.room && this.room.localParticipant) {
-      this.room.localParticipant.setMicrophoneEnabled(true);
-      this.isMuted = false;
-    } else {
-      console.warn('Cannot unmute.');
+  set isCallerMuted(newMuteStatus: boolean) {
+    if (!this.room?.localParticipant) {
+      throw new Error('Cannot set isCallerMuted.');
     }
-  }
 
-  public toggleMute(): void {
-    if (this.room && this.room.localParticipant) {
-      this.isMuted = !this.isMuted;
-      this.room.localParticipant.setMicrophoneEnabled(!this.isMuted);
-    } else {
-      console.warn('Cannot toggle mute.');
-    }
-  }
-
-  public isMicrophoneMuted(): boolean {
-    return this.isMuted;
+    this._isCallerMuted = newMuteStatus;
+    this.room.localParticipant.setMicrophoneEnabled(!this._isCallerMuted);
   }
 
   private async handleSocketMessage(event: MessageEvent) {
