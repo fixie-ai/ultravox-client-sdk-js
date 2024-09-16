@@ -128,6 +128,8 @@ export class UltravoxSession {
   private readonly audioContext: AudioContext;
   private readonly experimentalMessages: Set<string>;
 
+  private isMuted = false;
+
   constructor({
     audioContext,
     experimentalMessages,
@@ -165,6 +167,37 @@ export class UltravoxSession {
       throw new Error(`Cannot send text while not connected. Current status is ${status}.`);
     }
     this.sendData({ type: 'input_text_message', text });
+  }
+
+  public mute(): void {
+    if (this.room && this.room.localParticipant) {
+      this.room.localParticipant.setMicrophoneEnabled(false);
+      this.isMuted = true;
+    } else {
+      console.warn('Cannot mute.');
+    }
+  }
+
+  public unmute(): void {
+    if (this.room && this.room.localParticipant) {
+      this.room.localParticipant.setMicrophoneEnabled(true);
+      this.isMuted = false;
+    } else {
+      console.warn('Cannot unmute.');
+    }
+  }
+
+  public toggleMute(): void {
+    if (this.room && this.room.localParticipant) {
+      this.isMuted = !this.isMuted;
+      this.room.localParticipant.setMicrophoneEnabled(!this.isMuted);
+    } else {
+      console.warn('Cannot toggle mute.');
+    }
+  }
+
+  public isMicrophoneMuted(): boolean {
+    return this.isMuted;
   }
 
   private async handleSocketMessage(event: MessageEvent) {
