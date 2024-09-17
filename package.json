@@ -1,6 +1,6 @@
 {
   "name": "ultravox-client",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "private": false,
   "files": [
     "dist"
@@ -21,7 +21,7 @@
     "prepare": "tshy"
   },
   "dependencies": {
-    "livekit-client": "^2.0.10"
+    "livekit-client": "^2.5.1"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

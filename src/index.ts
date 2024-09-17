@@ -23,6 +23,8 @@ export enum Role {
   AGENT = 'agent',
 }
 
+export type RoleString = 'user' | 'agent';
+
 export enum Medium {
   VOICE = 'voice',
   TEXT = 'text',
@@ -128,6 +130,9 @@ export class UltravoxSession {
   private readonly audioContext: AudioContext;
   private readonly experimentalMessages: Set<string>;
 
+  private isUserMuted: boolean = false;
+  private isAgentMuted: boolean = false;
+
   constructor({
     audioContext,
     experimentalMessages,
@@ -165,6 +170,87 @@ export class UltravoxSession {
       throw new Error(`Cannot send text while not connected. Current status is ${status}.`);
     }
     this.sendData({ type: 'input_text_message', text });
+  }
+
+  mute(roles: Role[] | Set<Role>): void {
+    const roleSet = new Set<Role>(roles);
+
+    for (const role of roleSet) {
+      if (!Object.values(Role).includes(role)) {
+        throw new Error(`Invalid role: ${role}`);
+      }
+
+      switch (role) {
+        case Role.AGENT:
+          if (!this.room?.remoteParticipants) {
+            throw new Error('Cannot set isAgentMuted.');
+          }
+          this.isAgentMuted = true;
+          this.room.remoteParticipants.forEach((rp) => {
+            rp.audioTrackPublications.forEach((atp) => {
+              atp.track?.setMuted(this.isAgentMuted);
+            });
+          });
+          break;
+
+        case Role.USER:
+          if (!this.room?.localParticipant) {
+            throw new Error('Cannot set isCallerMuted.');
+          }
+          this.isUserMuted = true;
+          this.room.localParticipant.setMicrophoneEnabled(!this.isUserMuted);
+          break;
+
+        default:
+          break;
+      }
+    }
+  }
+
+  unmute(roles: Role[] | Set<Role>): void {
+    const roleSet = new Set<Role>(roles);
+
+    for (const role of roleSet) {
+      if (!Object.values(Role).includes(role)) {
+        throw new Error(`Invalid role: ${role}`);
+      }
+
+      switch (role) {
+        case Role.AGENT:
+          if (!this.room?.remoteParticipants) {
+            throw new Error('Cannot set isAgentMuted.');
+          }
+          this.isAgentMuted = false;
+          this.room.remoteParticipants.forEach((rp) => {
+            rp.audioTrackPublications.forEach((atp) => {
+              atp.track?.setMuted(this.isAgentMuted);
+            });
+          });
+          break;
+
+        case Role.USER:
+          if (!this.room?.localParticipant) {
+            throw new Error('Cannot set isCallerMuted.');
+          }
+          this.isUserMuted = false;
+          this.room.localParticipant.setMicrophoneEnabled(!this.isUserMuted);
+          break;
+
+        default:
+          break;
+      }
+    }
+  }
+
+  isMuted(role: Role): boolean {
+    switch (role) {
+      case Role.AGENT:
+        return this.isAgentMuted;
+      case Role.USER:
+        return this.isUserMuted;
+      default:
+        throw new Error(`Invalid role: ${role}`);
+    }
   }
 
   private async handleSocketMessage(event: MessageEvent) {
