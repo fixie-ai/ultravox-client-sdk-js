@@ -172,10 +172,14 @@ export class UltravoxSession {
     this.sendData({ type: 'input_text_message', text });
   }
 
-  mute(roles: RoleString | RoleString[] | Set<RoleString> | Role | Role[] | Set<Role>): void {
-    const roleSet = this.getRoleSet(roles);
+  mute(roles: Role[] | Set<Role>): void {
+    const roleSet = new Set<Role>(roles);
 
     for (const role of roleSet) {
+      if (!Object.values(Role).includes(role)) {
+        throw new Error(`Invalid role: ${role}`);
+      }
+
       switch (role) {
         case Role.AGENT:
           if (!this.room?.remoteParticipants) {
@@ -203,10 +207,14 @@ export class UltravoxSession {
     }
   }
 
-  unmute(roles: RoleString | RoleString[] | Set<RoleString> | Role | Role[] | Set<Role>): void {
-    const roleSet = this.getRoleSet(roles);
+  unmute(roles: Role[] | Set<Role>): void {
+    const roleSet = new Set<Role>(roles);
 
     for (const role of roleSet) {
+      if (!Object.values(Role).includes(role)) {
+        throw new Error(`Invalid role: ${role}`);
+      }
+
       switch (role) {
         case Role.AGENT:
           if (!this.room?.remoteParticipants) {
@@ -234,16 +242,14 @@ export class UltravoxSession {
     }
   }
 
-  isMuted(role: RoleString | Role): boolean {
-    const roleString = role.toString() as RoleString;
-
-    switch (roleString) {
+  isMuted(role: Role): boolean {
+    switch (role) {
       case Role.AGENT:
         return this.isAgentMuted;
       case Role.USER:
         return this.isUserMuted;
       default:
-        throw new Error(`Invalid role: ${roleString}`);
+        throw new Error(`Invalid role: ${role}`);
     }
   }
 
@@ -353,25 +359,5 @@ export class UltravoxSession {
     } else if (this.experimentalMessages) {
       this.state.dispatchEvent(new UltravoxExperimentalMessageEvent(msg));
     }
-  }
-
-  private getRoleSet(roles: RoleString | RoleString[] | Set<RoleString> | Role | Role[] | Set<Role>): Set<RoleString> {
-    const roleSet = new Set<RoleString>();
-
-    if (roles instanceof Set) {
-      roles.forEach((role) => roleSet.add(role.toString() as RoleString));
-    } else if (Array.isArray(roles)) {
-      roles.forEach((role) => roleSet.add(role.toString() as RoleString));
-    } else {
-      roleSet.add(roles.toString() as RoleString);
-    }
-
-    for (const role of roleSet) {
-      if (!Object.values(Role).includes(role as Role)) {
-        throw new Error(`Invalid role: ${role}`);
-      }
-    }
-
-    return roleSet;
   }
 }
