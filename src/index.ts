@@ -23,6 +23,8 @@ export enum Role {
   AGENT = 'agent',
 }
 
+export type RoleString = 'user' | 'agent';
+
 export enum Medium {
   VOICE = 'voice',
   TEXT = 'text',
@@ -128,7 +130,8 @@ export class UltravoxSession {
   private readonly audioContext: AudioContext;
   private readonly experimentalMessages: Set<string>;
 
-  private _isCallerMuted: boolean = false;
+  private isUserMuted: boolean = false;
+  private isAgentMuted: boolean = false;
 
   constructor({
     audioContext,
@@ -169,17 +172,79 @@ export class UltravoxSession {
     this.sendData({ type: 'input_text_message', text });
   }
 
-  get isCallerMuted(): boolean {
-    return this._isCallerMuted;
+  mute(roles: RoleString | RoleString[] | Set<RoleString> | Role | Role[] | Set<Role>): void {
+    const roleSet = this.getRoleSet(roles);
+
+    for (const role of roleSet) {
+      switch (role) {
+        case Role.AGENT:
+          if (!this.room?.remoteParticipants) {
+            throw new Error('Cannot set isAgentMuted.');
+          }
+          this.isAgentMuted = true;
+          this.room.remoteParticipants.forEach((rp) => {
+            rp.audioTrackPublications.forEach((atp) => {
+              atp.track?.setMuted(this.isAgentMuted);
+            });
+          });
+          break;
+
+        case Role.USER:
+          if (!this.room?.localParticipant) {
+            throw new Error('Cannot set isCallerMuted.');
+          }
+          this.isUserMuted = true;
+          this.room.localParticipant.setMicrophoneEnabled(!this.isUserMuted);
+          break;
+
+        default:
+          break;
+      }
+    }
   }
 
-  set isCallerMuted(newMuteStatus: boolean) {
-    if (!this.room?.localParticipant) {
-      throw new Error('Cannot set isCallerMuted.');
-    }
+  unmute(roles: RoleString | RoleString[] | Set<RoleString> | Role | Role[] | Set<Role>): void {
+    const roleSet = this.getRoleSet(roles);
 
-    this._isCallerMuted = newMuteStatus;
-    this.room.localParticipant.setMicrophoneEnabled(!this._isCallerMuted);
+    for (const role of roleSet) {
+      switch (role) {
+        case Role.AGENT:
+          if (!this.room?.remoteParticipants) {
+            throw new Error('Cannot set isAgentMuted.');
+          }
+          this.isAgentMuted = false;
+          this.room.remoteParticipants.forEach((rp) => {
+            rp.audioTrackPublications.forEach((atp) => {
+              atp.track?.setMuted(this.isAgentMuted);
+            });
+          });
+          break;
+
+        case Role.USER:
+          if (!this.room?.localParticipant) {
+            throw new Error('Cannot set isCallerMuted.');
+          }
+          this.isUserMuted = false;
+          this.room.localParticipant.setMicrophoneEnabled(!this.isUserMuted);
+          break;
+
+        default:
+          break;
+      }
+    }
+  }
+
+  isMuted(role: RoleString | Role): boolean {
+    const roleString = role.toString() as RoleString;
+
+    switch (roleString) {
+      case Role.AGENT:
+        return this.isAgentMuted;
+      case Role.USER:
+        return this.isUserMuted;
+      default:
+        throw new Error(`Invalid role: ${roleString}`);
+    }
   }
 
   private async handleSocketMessage(event: MessageEvent) {
@@ -288,5 +353,25 @@ export class UltravoxSession {
     } else if (this.experimentalMessages) {
       this.state.dispatchEvent(new UltravoxExperimentalMessageEvent(msg));
     }
+  }
+
+  private getRoleSet(roles: RoleString | RoleString[] | Set<RoleString> | Role | Role[] | Set<Role>): Set<RoleString> {
+    const roleSet = new Set<RoleString>();
+
+    if (roles instanceof Set) {
+      roles.forEach((role) => roleSet.add(role.toString() as RoleString));
+    } else if (Array.isArray(roles)) {
+      roles.forEach((role) => roleSet.add(role.toString() as RoleString));
+    } else {
+      roleSet.add(roles.toString() as RoleString);
+    }
+
+    for (const role of roleSet) {
+      if (!Object.values(Role).includes(role as Role)) {
+        throw new Error(`Invalid role: ${role}`);
+      }
+    }
+
+    return roleSet;
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "ultravox-client",
-  "version": "0.3.0",
+  "version": "0.2.16",
   "private": false,
   "files": [
     "dist"
