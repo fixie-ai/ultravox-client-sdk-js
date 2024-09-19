@@ -191,7 +191,7 @@ export class UltravoxSession {
       throw new Error('Cannot unmuteMic.');
     }
     this._isMicMuted = false;
-    this.room.localParticipant.setMicrophoneEnabled(!this._isMicMuted);
+    this.room.localParticipant.setMicrophoneEnabled(true);
   }
 
   muteSpeaker(): void {
