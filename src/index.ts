@@ -23,8 +23,6 @@ export enum Role {
   AGENT = 'agent',
 }
 
-export type RoleString = 'user' | 'agent';
-
 export enum Medium {
   VOICE = 'voice',
   TEXT = 'text',
@@ -130,8 +128,8 @@ export class UltravoxSession {
   private readonly audioContext: AudioContext;
   private readonly experimentalMessages: Set<string>;
 
-  private isUserMuted: boolean = false;
-  private isAgentMuted: boolean = false;
+  private _isMicMuted: boolean = false;
+  private _isSpeakerMuted: boolean = false;
 
   constructor({
     audioContext,
@@ -142,6 +140,14 @@ export class UltravoxSession {
   } = {}) {
     this.audioContext = audioContext || new AudioContext();
     this.experimentalMessages = experimentalMessages || new Set();
+  }
+
+  get isMicMuted(): boolean {
+    return this._isMicMuted;
+  }
+
+  get isSpeakerMuted(): boolean {
+    return this._isSpeakerMuted;
   }
 
   joinCall(joinUrl: string): UltravoxSessionState {
@@ -172,85 +178,44 @@ export class UltravoxSession {
     this.sendData({ type: 'input_text_message', text });
   }
 
-  mute(roles: Role[] | Set<Role>): void {
-    const roleSet = new Set<Role>(roles);
-
-    for (const role of roleSet) {
-      if (!Object.values(Role).includes(role)) {
-        throw new Error(`Invalid role: ${role}`);
-      }
-
-      switch (role) {
-        case Role.AGENT:
-          if (!this.room?.remoteParticipants) {
-            throw new Error('Cannot set isAgentMuted.');
-          }
-          this.isAgentMuted = true;
-          this.room.remoteParticipants.forEach((rp) => {
-            rp.audioTrackPublications.forEach((atp) => {
-              atp.track?.setMuted(this.isAgentMuted);
-            });
-          });
-          break;
-
-        case Role.USER:
-          if (!this.room?.localParticipant) {
-            throw new Error('Cannot set isCallerMuted.');
-          }
-          this.isUserMuted = true;
-          this.room.localParticipant.setMicrophoneEnabled(!this.isUserMuted);
-          break;
-
-        default:
-          break;
-      }
+  muteMic(): void {
+    if (!this.room?.localParticipant) {
+      throw new Error('Cannot muteMic.');
     }
+    this._isMicMuted = true;
+    this.room.localParticipant.setMicrophoneEnabled(false);
   }
 
-  unmute(roles: Role[] | Set<Role>): void {
-    const roleSet = new Set<Role>(roles);
-
-    for (const role of roleSet) {
-      if (!Object.values(Role).includes(role)) {
-        throw new Error(`Invalid role: ${role}`);
-      }
-
-      switch (role) {
-        case Role.AGENT:
-          if (!this.room?.remoteParticipants) {
-            throw new Error('Cannot set isAgentMuted.');
-          }
-          this.isAgentMuted = false;
-          this.room.remoteParticipants.forEach((rp) => {
-            rp.audioTrackPublications.forEach((atp) => {
-              atp.track?.setMuted(this.isAgentMuted);
-            });
-          });
-          break;
-
-        case Role.USER:
-          if (!this.room?.localParticipant) {
-            throw new Error('Cannot set isCallerMuted.');
-          }
-          this.isUserMuted = false;
-          this.room.localParticipant.setMicrophoneEnabled(!this.isUserMuted);
-          break;
-
-        default:
-          break;
-      }
+  unmuteMic(): void {
+    if (!this.room?.localParticipant) {
+      throw new Error('Cannot unmuteMic.');
     }
+    this._isMicMuted = false;
+    this.room.localParticipant.setMicrophoneEnabled(true);
   }
 
-  isMuted(role: Role): boolean {
-    switch (role) {
-      case Role.AGENT:
-        return this.isAgentMuted;
-      case Role.USER:
-        return this.isUserMuted;
-      default:
-        throw new Error(`Invalid role: ${role}`);
+  muteSpeaker(): void {
+    if (!this.room?.remoteParticipants) {
+      throw new Error('Cannot muteSpeaker.');
     }
+    this._isSpeakerMuted = true;
+    this.room.remoteParticipants.forEach((participant) => {
+      participant.audioTrackPublications.forEach((publication) => {
+        publication.track?.setMuted(true);
+      });
+    });
+  }
+
+  unmuteSpeaker(): void {
+    if (!this.room?.remoteParticipants) {
+      throw new Error('Cannot unmuteSpeaker.');
+    }
+    this._isSpeakerMuted = false;
+    this.room.remoteParticipants.forEach((participant) => {
+      participant.audioTrackPublications.forEach((publication) => {
+        publication.track?.setMuted(false);
+      });
+    });
   }
 
   private async handleSocketMessage(event: MessageEvent) {
