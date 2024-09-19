@@ -211,9 +211,9 @@ export class UltravoxSession {
       throw new Error('Cannot unmuteSpeaker.');
     }
     this._isSpeakerMuted = false;
-    this.room.remoteParticipants.forEach((rp) => {
-      rp.audioTrackPublications.forEach((atp) => {
-        atp.track?.setMuted(this._isSpeakerMuted);
+    this.room.remoteParticipants.forEach((participant) => {
+      participant.audioTrackPublications.forEach((publication) => {
+        publication.track?.setMuted(false);
       });
     });
   }
