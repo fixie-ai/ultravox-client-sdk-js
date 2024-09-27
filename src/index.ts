@@ -194,6 +194,18 @@ export class UltravoxSession {
     this.room.localParticipant.setMicrophoneEnabled(true);
   }
 
+  toggleMicMute(): void {
+    if (!this.room?.localParticipant) {
+      throw new Error('Cannot toggle mic mute.');
+    }
+
+    if (this.isMicMuted) {
+      this.unmuteMic();
+    } else {
+      this.muteMic();
+    }
+  }
+
   muteSpeaker(): void {
     if (!this.room?.remoteParticipants) {
       throw new Error('Cannot muteSpeaker.');
@@ -216,18 +228,6 @@ export class UltravoxSession {
         publication.track?.setMuted(false);
       });
     });
-  }
-
-  toggleMicMute(): void {
-    if (!this.room?.localParticipant) {
-      throw new Error('Cannot toggle mic mute.');
-    }
-
-    if (this.isMicMuted) {
-      this.unmuteMic();
-    } else {
-      this.muteMic();
-    }
   }
 
   toggleSpeakerMute(): void {
