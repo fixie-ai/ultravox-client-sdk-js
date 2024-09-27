@@ -218,6 +218,30 @@ export class UltravoxSession {
     });
   }
 
+  toggleMicMute(): void {
+    if (!this.room?.localParticipant) {
+      throw new Error('Cannot toggle mic mute.');
+    }
+
+    if (this.isMicMuted) {
+      this.unmuteMic();
+    } else {
+      this.muteMic();
+    }
+  }
+
+  toggleSpeakerMute(): void {
+    if (!this.room?.remoteParticipants) {
+      throw new Error('Cannot toggle speaker mute.');
+    }
+
+    if (this.isSpeakerMuted) {
+      this.unmuteSpeaker();
+    } else {
+      this.muteSpeaker();
+    }
+  }
+
   private async handleSocketMessage(event: MessageEvent) {
     const msg = JSON.parse(event.data);
     // We attach the Livekit audio to an audio element so that we can mute the audio
