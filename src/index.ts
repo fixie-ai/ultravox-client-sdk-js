@@ -55,6 +55,11 @@ export class UltravoxExperimentalMessageEvent extends Event {
   }
 }
 
+type ClientToolReturnType = string | { result: string; responseType: string };
+export type ClientToolImplementation = (parameters: {
+  [key: string]: any;
+}) => ClientToolReturnType | Promise<ClientToolReturnType>;
+
 export class UltravoxSession extends EventTarget {
   private static CONNECTED_STATUSES = new Set([
     UltravoxSessionStatus.LISTENING,
@@ -64,6 +69,7 @@ export class UltravoxSession extends EventTarget {
 
   private readonly _transcripts: Transcript[] = [];
   private _status: UltravoxSessionStatus = UltravoxSessionStatus.DISCONNECTED;
+  private readonly registeredTools: Map<string, ClientToolImplementation> = new Map();
   private socket?: WebSocket;
   private room?: Room;
   private audioElement = new Audio();
@@ -106,6 +112,10 @@ export class UltravoxSession extends EventTarget {
 
   get isSpeakerMuted(): boolean {
     return this._isSpeakerMuted;
+  }
+
+  registerTool(name: string, implementation: ClientToolImplementation): void {
+    this.registeredTools.set(name, implementation);
   }
 
   joinCall(joinUrl: string): void {
@@ -306,6 +316,8 @@ export class UltravoxSession extends EventTarget {
           this.addOrUpdateTranscript(newTranscript);
         }
       }
+    } else if (msg.type == 'client_tool_invocation') {
+      this.invokeClientTool(msg.toolName, msg.invocationId, msg.parameters);
     } else if (this.experimentalMessages) {
       this.dispatchEvent(new UltravoxExperimentalMessageEvent(msg));
     }
@@ -323,5 +335,60 @@ export class UltravoxSession extends EventTarget {
       this._transcripts.push(transcript);
     }
     this.dispatchEvent(new UltravoxTranscriptsChangedEvent());
+  }
+
+  private invokeClientTool(toolName: string, invocationId: string, parameters: { [key: string]: any }) {
+    const tool = this.registeredTools.get(toolName);
+    if (!tool) {
+      this.sendData({
+        type: 'client_tool_result',
+        invocationId,
+        errorType: 'undefined',
+        errorMessage: `Client tool ${toolName} is not registered (TypeScript client)`,
+      });
+      return;
+    }
+
+    try {
+      const result = tool(parameters);
+      if (result instanceof Promise) {
+        result
+          .then((result) => this.handleClientToolResult(invocationId, result))
+          .catch((error) => this.handleClientToolFailure(invocationId, error));
+      } else {
+        this.handleClientToolResult(invocationId, result);
+      }
+    } catch (e) {
+      this.handleClientToolFailure(invocationId, e);
+    }
+  }
+
+  private handleClientToolResult(invocationId: string, result: any) {
+    if (typeof result === 'string') {
+      this.sendData({ type: 'client_tool_result', invocationId, result });
+    } else {
+      const resultString = result.result;
+      const responseType = result.responseType;
+      if (typeof resultString !== 'string' || typeof responseType !== 'string') {
+        this.sendData({
+          type: 'client_tool_result',
+          invocationId,
+          errorType: 'implementation-error',
+          errorMessage:
+            'Client tool result must be a string or an object with string "result" and "responseType" properties.',
+        });
+      } else {
+        this.sendData({ type: 'client_tool_result', invocationId, result: resultString, responseType });
+      }
+    }
+  }
+
+  private handleClientToolFailure(invocationId: string, error: any) {
+    this.sendData({
+      type: 'client_tool_result',
+      invocationId,
+      errorType: 'implementation-error',
+      errorMessage: error instanceof Error ? error.message : undefined,
+    });
   }
 }
