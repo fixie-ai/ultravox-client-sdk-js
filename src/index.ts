@@ -8,50 +8,68 @@ import {
   Track,
 } from 'livekit-client';
 
+/* The current status of an UltravoxSession. */
 export enum UltravoxSessionStatus {
+  /* The session is not connected and not attempting to connect. This is the initial state. */
   DISCONNECTED = 'disconnected',
+  /* The client is disconnecting from the session. */
   DISCONNECTING = 'disconnecting',
+  /* The client is attempting to connect to the session. */
   CONNECTING = 'connecting',
+  /* The client is connected to the session and the server is warming up. */
   IDLE = 'idle',
+  /* The client is connected and the server is listening for voice input. */
   LISTENING = 'listening',
+  /* The client is connected and the server is considering its response. The user can still interrupt. */
   THINKING = 'thinking',
+  /* The client is connected and the server is playing response audio. The user can interrupt as needed. */
   SPEAKING = 'speaking',
 }
 
+/* The participant responsible for an utterance. */
 export enum Role {
   USER = 'user',
   AGENT = 'agent',
 }
 
+/* How a message was communicated. */
 export enum Medium {
   VOICE = 'voice',
   TEXT = 'text',
 }
 
+/** A transcription of a single utterance. */
 export class Transcript {
   constructor(
+    /* The possibly-incomplete text of an utterance. */
     readonly text: string,
+    /* Whether the text is complete or the utterance is ongoing. */
     readonly isFinal: boolean,
+    /* Who emitted the utterance. */
     readonly speaker: Role,
+    /* The medium through which the utterance was emitted. */
     readonly medium: Medium,
   ) {}
 }
 
+/* Event emitted by an UltravoxSession when its status changes. */
 export class UltravoxSessionStatusChangedEvent extends Event {
   constructor() {
-    super('ultravoxSessionStatusChanged');
+    super('status');
   }
 }
 
+/* Event emitted by an UltravoxSession when its transcripts change. */
 export class UltravoxTranscriptsChangedEvent extends Event {
   constructor() {
-    super('ultravoxTranscriptsChanged');
+    super('transcripts');
   }
 }
 
+/* Event emitted by an UltravoxSession when an experimental message is received. */
 export class UltravoxExperimentalMessageEvent extends Event {
   constructor(readonly message: any) {
-    super('ultravoxExperimentalMessage');
+    super('experimental_message');
   }
 }
 
@@ -60,6 +78,15 @@ export type ClientToolImplementation = (parameters: {
   [key: string]: any;
 }) => ClientToolReturnType | Promise<ClientToolReturnType>;
 
+/**
+ * Manages a single session with Ultravox and emits events to notify consumers of
+ * state changes. The following events are emitted:
+ *
+ * - status: The status of the session has changed.
+ * - transcripts: A transcript was added or updated.
+ * - experimental_message: An experimental message was received. The message is included in the event.
+ *
+ */
 export class UltravoxSession extends EventTarget {
   private static CONNECTED_STATUSES = new Set([
     UltravoxSessionStatus.LISTENING,
@@ -86,6 +113,11 @@ export class UltravoxSession extends EventTarget {
   private _isMicMuted: boolean = false;
   private _isSpeakerMuted: boolean = false;
 
+  /**
+   * Constructor for UltravoxSession.
+   * @param audioContext An AudioContext to use for audio processing. If not provided, a new AudioContext will be created.
+   * @param experimentalMessages A set of experimental message types to enable. Empty by default.
+   */
   constructor({
     audioContext,
     experimentalMessages,
@@ -98,26 +130,44 @@ export class UltravoxSession extends EventTarget {
     this.experimentalMessages = experimentalMessages || new Set();
   }
 
+  /** Returns all transcripts for the current session. */
   get transcripts(): Transcript[] {
-    return this._transcripts;
+    return [...this._transcripts];
   }
 
+  /** Returns the session's current status. */
   get status(): UltravoxSessionStatus {
     return this._status;
   }
 
+  /**
+   * Indicates whether the user's mic is currently muted for the session. (Does not inspect
+   * hardware state.)
+   */
   get isMicMuted(): boolean {
     return this._isMicMuted;
   }
 
+  /**
+   * Indicates whether the user's speaker (e.g. agent output audio) is currently muted for the
+   * session. (Does not inspect system volume or hardware state.)
+   */
   get isSpeakerMuted(): boolean {
     return this._isSpeakerMuted;
   }
 
+  /**
+   * Registers a client tool implementation with the given name. If the call is
+   * started with a client-implemented tool, this implementation will be invoked
+   * when the model calls the tool.
+   *
+   * See https://docs.ultravox.ai/tools for more information.
+   */
   registerTool(name: string, implementation: ClientToolImplementation): void {
     this.registeredTools.set(name, implementation);
   }
 
+  /** Connects to a call using the given joinUrl. */
   joinCall(joinUrl: string): void {
     if (this._status !== UltravoxSessionStatus.DISCONNECTED) {
       throw new Error('Cannot join a new call while already in a call');
@@ -133,10 +183,12 @@ export class UltravoxSession extends EventTarget {
     this.socket.onclose = (event) => this.handleSocketClose(event);
   }
 
+  /** Leaves the current call (if any). */
   async leaveCall(): Promise<void> {
     await this.disconnect();
   }
 
+  /** Sends a message via text. */
   sendText(text: string) {
     if (!UltravoxSession.CONNECTED_STATUSES.has(this._status)) {
       throw new Error(`Cannot send text while not connected. Current status is ${this._status}.`);
@@ -144,6 +196,7 @@ export class UltravoxSession extends EventTarget {
     this.sendData({ type: 'input_text_message', text });
   }
 
+  /** Mutes audio input from the user. */
   muteMic(): void {
     if (!this.room?.localParticipant) {
       throw new Error('Cannot muteMic.');
@@ -152,6 +205,7 @@ export class UltravoxSession extends EventTarget {
     this.room.localParticipant.setMicrophoneEnabled(false);
   }
 
+  /** Unmutes audio input from the user. */
   unmuteMic(): void {
     if (!this.room?.localParticipant) {
       throw new Error('Cannot unmuteMic.');
@@ -160,6 +214,7 @@ export class UltravoxSession extends EventTarget {
     this.room.localParticipant.setMicrophoneEnabled(true);
   }
 
+  /** Toggles the mute state of the user's audio input. */
   toggleMicMute(): void {
     if (!this.room?.localParticipant) {
       throw new Error('Cannot toggle mic mute.');
@@ -172,6 +227,7 @@ export class UltravoxSession extends EventTarget {
     }
   }
 
+  /** Mutes audio output from the agent. */
   muteSpeaker(): void {
     if (!this.room?.remoteParticipants) {
       throw new Error('Cannot muteSpeaker.');
@@ -184,6 +240,7 @@ export class UltravoxSession extends EventTarget {
     });
   }
 
+  /** Unmutes audio output from the agent. */
   unmuteSpeaker(): void {
     if (!this.room?.remoteParticipants) {
       throw new Error('Cannot unmuteSpeaker.');
@@ -196,6 +253,7 @@ export class UltravoxSession extends EventTarget {
     });
   }
 
+  /** Toggles the mute state of the agent's output audio. */
   toggleSpeakerMute(): void {
     if (!this.room?.remoteParticipants) {
       throw new Error('Cannot toggle speaker mute.');
