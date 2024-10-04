@@ -163,8 +163,15 @@ export class UltravoxSession extends EventTarget {
    *
    * See https://docs.ultravox.ai/tools for more information.
    */
-  registerTool(name: string, implementation: ClientToolImplementation): void {
+  registerToolImplementation(name: string, implementation: ClientToolImplementation): void {
     this.registeredTools.set(name, implementation);
+  }
+
+  /** Convenience batch wrapper for registerToolImplementation. */
+  registerToolImplementations(implementationMap: { [name: string]: ClientToolImplementation }): void {
+    for (const [name, implementation] of Object.entries(implementationMap)) {
+      this.registerToolImplementation(name, implementation);
+    }
   }
 
   /** Connects to a call using the given joinUrl. */
