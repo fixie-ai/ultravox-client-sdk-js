@@ -37,31 +37,15 @@ export class Transcript {
   ) {}
 }
 
-export class UltravoxSessionStateChangeEvent extends Event {
-  constructor(
-    eventName: string,
-    readonly state: UltravoxSessionStatus,
-    readonly transcripts: Transcript[],
-  ) {
-    super(eventName);
+export class UltravoxSessionStatusChangedEvent extends Event {
+  constructor() {
+    super('ultravoxSessionStatusChanged');
   }
 }
 
-export class UltravoxSessionStatusChangedEvent extends UltravoxSessionStateChangeEvent {
-  constructor(
-    readonly state: UltravoxSessionStatus,
-    readonly transcripts: Transcript[],
-  ) {
-    super('ultravoxSessionStatusChanged', state, transcripts);
-  }
-}
-
-export class UltravoxTranscriptsChangedEvent extends UltravoxSessionStateChangeEvent {
-  constructor(
-    readonly state: UltravoxSessionStatus,
-    readonly transcripts: Transcript[],
-  ) {
-    super('ultravoxTranscriptsChanged', state, transcripts);
+export class UltravoxTranscriptsChangedEvent extends Event {
+  constructor() {
+    super('ultravoxTranscriptsChanged');
   }
 }
 
@@ -71,50 +55,15 @@ export class UltravoxExperimentalMessageEvent extends Event {
   }
 }
 
-export class UltravoxSessionState extends EventTarget {
-  private readonly transcripts: Transcript[] = [];
-  private status: UltravoxSessionStatus = UltravoxSessionStatus.DISCONNECTED;
-
-  constructor() {
-    super();
-  }
-
-  getTranscripts(): Transcript[] {
-    return this.transcripts;
-  }
-
-  getStatus(): UltravoxSessionStatus {
-    return this.status;
-  }
-
-  setStatus(status: UltravoxSessionStatus) {
-    this.status = status;
-    this.dispatchEvent(new UltravoxSessionStatusChangedEvent(status, this.transcripts));
-  }
-
-  addOrUpdateTranscript(transcript: Transcript) {
-    if (this.transcripts.length) {
-      const lastTranscript = this.transcripts[this.transcripts.length - 1];
-      if (lastTranscript && !lastTranscript.isFinal && transcript.speaker === lastTranscript.speaker) {
-        this.transcripts[this.transcripts.length - 1] = transcript;
-      } else {
-        this.transcripts.push(transcript);
-      }
-    } else {
-      this.transcripts.push(transcript);
-    }
-    this.dispatchEvent(new UltravoxTranscriptsChangedEvent(this.status, this.transcripts));
-  }
-}
-
-export class UltravoxSession {
+export class UltravoxSession extends EventTarget {
   private static CONNECTED_STATUSES = new Set([
     UltravoxSessionStatus.LISTENING,
     UltravoxSessionStatus.THINKING,
     UltravoxSessionStatus.SPEAKING,
   ]);
 
-  private readonly state = new UltravoxSessionState();
+  private readonly _transcripts: Transcript[] = [];
+  private _status: UltravoxSessionStatus = UltravoxSessionStatus.DISCONNECTED;
   private socket?: WebSocket;
   private room?: Room;
   private audioElement = new Audio();
@@ -138,8 +87,17 @@ export class UltravoxSession {
     audioContext?: AudioContext;
     experimentalMessages?: Set<string>;
   } = {}) {
+    super();
     this.audioContext = audioContext || new AudioContext();
     this.experimentalMessages = experimentalMessages || new Set();
+  }
+
+  get transcripts(): Transcript[] {
+    return this._transcripts;
+  }
+
+  get status(): UltravoxSessionStatus {
+    return this._status;
   }
 
   get isMicMuted(): boolean {
@@ -150,8 +108,8 @@ export class UltravoxSession {
     return this._isSpeakerMuted;
   }
 
-  joinCall(joinUrl: string): UltravoxSessionState {
-    if (this.state.getStatus() !== UltravoxSessionStatus.DISCONNECTED) {
+  joinCall(joinUrl: string): void {
+    if (this._status !== UltravoxSessionStatus.DISCONNECTED) {
       throw new Error('Cannot join a new call while already in a call');
     }
     if (this.experimentalMessages) {
@@ -159,11 +117,10 @@ export class UltravoxSession {
       url.searchParams.set('experimentalMessages', Array.from(this.experimentalMessages.values()).join(','));
       joinUrl = url.toString();
     }
-    this.state.setStatus(UltravoxSessionStatus.CONNECTING);
+    this.setStatus(UltravoxSessionStatus.CONNECTING);
     this.socket = new WebSocket(joinUrl);
     this.socket.onmessage = (event) => this.handleSocketMessage(event);
     this.socket.onclose = (event) => this.handleSocketClose(event);
-    return this.state;
   }
 
   async leaveCall(): Promise<void> {
@@ -171,9 +128,8 @@ export class UltravoxSession {
   }
 
   sendText(text: string) {
-    const status = this.state.getStatus();
-    if (!UltravoxSession.CONNECTED_STATUSES.has(status)) {
-      throw new Error(`Cannot send text while not connected. Current status is ${status}.`);
+    if (!UltravoxSession.CONNECTED_STATUSES.has(this._status)) {
+      throw new Error(`Cannot send text while not connected. Current status is ${this._status}.`);
     }
     this.sendData({ type: 'input_text_message', text });
   }
@@ -261,7 +217,7 @@ export class UltravoxSession {
     this.localAudioTrack = track;
     this.localAudioTrack.setAudioContext(this.audioContext);
 
-    if ([UltravoxSessionStatus.DISCONNECTED, UltravoxSessionStatus.DISCONNECTING].includes(this.state.getStatus())) {
+    if ([UltravoxSessionStatus.DISCONNECTED, UltravoxSessionStatus.DISCONNECTING].includes(this.status)) {
       // We've been stopped while waiting for the mic permission (during createLocalTracks).
       await this.disconnect();
       return;
@@ -275,7 +231,7 @@ export class UltravoxSession {
 
     const opts = { name: 'audio', simulcast: false, source: Track.Source.Microphone };
     this.room.localParticipant.publishTrack(this.localAudioTrack, opts);
-    this.state.setStatus(UltravoxSessionStatus.IDLE);
+    this.setStatus(UltravoxSessionStatus.IDLE);
   }
 
   private async handleSocketClose(event: CloseEvent) {
@@ -283,9 +239,7 @@ export class UltravoxSession {
   }
 
   private async disconnect() {
-    if (this.state.getStatus() !== UltravoxSessionStatus.DISCONNECTING) {
-      this.state.setStatus(UltravoxSessionStatus.DISCONNECTING);
-    }
+    this.setStatus(UltravoxSessionStatus.DISCONNECTING);
     this.localAudioTrack?.stop();
     this.localAudioTrack = undefined;
     await this.room?.disconnect();
@@ -298,7 +252,7 @@ export class UltravoxSession {
     this.agentSourceNode = undefined;
     this.audioElement.pause();
     this.audioElement.srcObject = null;
-    this.state.setStatus(UltravoxSessionStatus.DISCONNECTED);
+    this.setStatus(UltravoxSessionStatus.DISCONNECTED);
   }
 
   private handleTrackSubscribed(track: RemoteTrack) {
@@ -309,8 +263,16 @@ export class UltravoxSession {
     }
     if (this.delayedSpeakingState) {
       this.delayedSpeakingState = false;
-      this.state.setStatus(UltravoxSessionStatus.SPEAKING);
+      this.setStatus(UltravoxSessionStatus.SPEAKING);
     }
+  }
+
+  private setStatus(status: UltravoxSessionStatus) {
+    if (this._status === status) {
+      return;
+    }
+    this._status = status;
+    this.dispatchEvent(new UltravoxSessionStatusChangedEvent());
   }
 
   private sendData(obj: any) {
@@ -326,27 +288,40 @@ export class UltravoxSession {
         // handleTrackSubscribed will be called soon and will change the state.
         this.delayedSpeakingState = true;
       } else {
-        this.state.setStatus(newState);
+        this.setStatus(newState);
       }
     } else if (msg.type === 'transcript') {
       const medium = msg.transcript.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
       const transcript = new Transcript(msg.transcript.text, msg.transcript.final, Role.USER, medium);
-      this.state.addOrUpdateTranscript(transcript);
+      this.addOrUpdateTranscript(transcript);
     } else if (msg.type === 'voice_synced_transcript' || msg.type == 'agent_text_transcript') {
       const medium = msg.type == 'agent_text_transcript' ? Medium.TEXT : Medium.VOICE;
       if (msg.text != null) {
         const newTranscript = new Transcript(msg.text, msg.final, Role.AGENT, medium);
-        this.state.addOrUpdateTranscript(newTranscript);
+        this.addOrUpdateTranscript(newTranscript);
       } else if (msg.delta != null) {
-        const transcripts = this.state.getTranscripts();
-        const lastTranscript = transcripts.length ? transcripts[transcripts.length - 1] : undefined;
+        const lastTranscript = this._transcripts.length ? this._transcripts[this._transcripts.length - 1] : undefined;
         if (lastTranscript && lastTranscript.speaker == Role.AGENT) {
           const newTranscript = new Transcript(lastTranscript.text + msg.delta, msg.final, Role.AGENT, medium);
-          this.state.addOrUpdateTranscript(newTranscript);
+          this.addOrUpdateTranscript(newTranscript);
         }
       }
     } else if (this.experimentalMessages) {
-      this.state.dispatchEvent(new UltravoxExperimentalMessageEvent(msg));
+      this.dispatchEvent(new UltravoxExperimentalMessageEvent(msg));
     }
+  }
+
+  private addOrUpdateTranscript(transcript: Transcript) {
+    if (this._transcripts.length) {
+      const lastTranscript = this._transcripts[this._transcripts.length - 1];
+      if (lastTranscript && !lastTranscript.isFinal && transcript.speaker === lastTranscript.speaker) {
+        this._transcripts[this._transcripts.length - 1] = transcript;
+      } else {
+        this._transcripts.push(transcript);
+      }
+    } else {
+      this._transcripts.push(transcript);
+    }
+    this.dispatchEvent(new UltravoxTranscriptsChangedEvent());
   }
 }
