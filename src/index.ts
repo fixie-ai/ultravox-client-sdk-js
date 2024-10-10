@@ -195,6 +195,17 @@ export class UltravoxSession extends EventTarget {
     await this.disconnect();
   }
 
+  /**
+   * Sets the agent's output medium. If the agent is currently speaking, this will take effect at
+   * the end of the agent's utterance. Also see muteSpeaker and unmuteSpeaker below.
+   */
+  setOutputMedium(medium: Medium) {
+    if (!UltravoxSession.CONNECTED_STATUSES.has(this._status)) {
+      throw new Error(`Cannot set output medium while not connected. Current status is ${this._status}.`);
+    }
+    this.sendData({ type: 'set_output_medium', medium });
+  }
+
   /** Sends a message via text. */
   sendText(text: string) {
     if (!UltravoxSession.CONNECTED_STATUSES.has(this._status)) {
