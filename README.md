@@ -10,7 +10,7 @@ Written in TypeScript, this library allows you to easily integrate Ultravox's re
 import { UltravoxSession } from 'ultravox-client';
 
 const session = new UltravoxSession();
-const state = await session.joinCall('wss://your-call-join-url');
+session.joinCall('wss://your-call-join-url');
 
 session.leaveCall();
 ```
@@ -19,16 +19,15 @@ _Note: Join URL's are created using the Ultravox API. See the [docs](https://fix
 
 ## Events
 
-When a call is started with `joinCall()`, an `UltravoxSessionState` object is returned. If we continue with the quick start code above, we can add event listeners for two events:
+If we continue with the quick start code above, we can add event listeners for two events:
 
 ```javascript
-state.addEventListener('ultravoxSessionStatusChanged', (event) => {
-  console.log('Session status changed: ', event.state);
+session.addEventListener('status', (event) => {
+  console.log('Session status changed: ', session.status);
 });
 
-state.addEventListener('ultravoxTranscriptsChanged', (event) => {
-  console.log('Transcripts updated: ', event.transcripts);
-  console.log('Current session status: ', event.state); // Session status is also available on the event
+session.addEventListener('transcripts', (event) => {
+  console.log('Transcripts updated: ', session.transcripts);
 });
 ```
 
@@ -36,14 +35,15 @@ state.addEventListener('ultravoxTranscriptsChanged', (event) => {
 
 The session status is based on the `UltravoxSessionStatus` enum and can be one of the following:
 
-```
-disconnecting
-connecting
-idle
-listening
-thinking
-speaking
-```
+| state         | description                                                                                         |
+| ------------- | --------------------------------------------------------------------------------------------------- |
+| disconnected  | The session is not connected and not attempting to connect. This is the initial state.              |
+| disconnecting | The client is disconnecting from the session.                                                       |
+| connecting    | The client is attempting to connect to the session.                                                 |
+| idle          | The client is connected to the session and the server is warming up.                                |
+| listening     | The client is connected and the server is listening for voice input.                                |
+| thinking      | The client is connected and the server is considering its response. The user can still interrupt.   |
+| speaking      | The client is connected and the server is playing response audio. The user can interrupt as needed. |
 
 ## Transcripts
 
