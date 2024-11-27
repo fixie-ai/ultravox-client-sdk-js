@@ -7,6 +7,7 @@ import {
   RoomEvent,
   Track,
 } from 'livekit-client';
+import { ULTRAVOX_SDK_VERSION } from './version.js';
 
 /* The current status of an UltravoxSession. */
 export enum UltravoxSessionStatus {
@@ -73,6 +74,18 @@ export class UltravoxExperimentalMessageEvent extends Event {
   }
 }
 
+/**
+ * Event emitted by an UltravoxSession when any data message is received, including those typically
+ * handled by this SDK.
+ *
+ * See https://docs.ultravox.ai/datamessages for message types.
+ */
+export class UltravoxDataMessageEvent extends Event {
+  constructor(readonly message: any) {
+    super('data_message');
+  }
+}
+
 type ClientToolReturnType = string | { result: string; responseType: string };
 export type ClientToolImplementation = (parameters: {
   [key: string]: any;
@@ -94,7 +107,7 @@ export class UltravoxSession extends EventTarget {
     UltravoxSessionStatus.SPEAKING,
   ]);
 
-  private readonly _transcripts: Transcript[] = [];
+  private readonly _transcripts: Array<Transcript | null> = [];
   private _status: UltravoxSessionStatus = UltravoxSessionStatus.DISCONNECTED;
   private readonly registeredTools: Map<string, ClientToolImplementation> = new Map();
   private socket?: WebSocket;
@@ -132,7 +145,7 @@ export class UltravoxSession extends EventTarget {
 
   /** Returns all transcripts for the current session. */
   get transcripts(): Transcript[] {
-    return [...this._transcripts];
+    return [...this._transcripts.filter((t) => t != null)] as Transcript[];
   }
 
   /** Returns the session's current status. */
@@ -175,15 +188,21 @@ export class UltravoxSession extends EventTarget {
   }
 
   /** Connects to a call using the given joinUrl. */
-  joinCall(joinUrl: string): void {
+  joinCall(joinUrl: string, clientVersion?: string): void {
     if (this._status !== UltravoxSessionStatus.DISCONNECTED) {
       throw new Error('Cannot join a new call while already in a call');
     }
-    if (this.experimentalMessages) {
-      const url = new URL(joinUrl);
-      url.searchParams.set('experimentalMessages', Array.from(this.experimentalMessages.values()).join(','));
-      joinUrl = url.toString();
+    const url = new URL(joinUrl);
+    let uvClientVersion = `web_${ULTRAVOX_SDK_VERSION}`;
+    if (clientVersion) {
+      uvClientVersion += `:${clientVersion}`;
     }
+    url.searchParams.set('clientVersion', uvClientVersion);
+    url.searchParams.set('apiVersion', '1');
+    if (this.experimentalMessages) {
+      url.searchParams.set('experimentalMessages', Array.from(this.experimentalMessages.values()).join(','));
+    }
+    joinUrl = url.toString();
     this.setStatus(UltravoxSessionStatus.CONNECTING);
     this.socket = new WebSocket(joinUrl);
     this.socket.onmessage = (event) => this.handleSocketMessage(event);
@@ -212,6 +231,14 @@ export class UltravoxSession extends EventTarget {
       throw new Error(`Cannot send text while not connected. Current status is ${this._status}.`);
     }
     this.sendData({ type: 'input_text_message', text });
+  }
+
+  /* Sends an arbitrary data message to the server. See https://docs.ultravox.ai/datamessages for message types. */
+  sendData(obj: any) {
+    if (obj.type == undefined) {
+      throw new Error('Data must have a type field');
+    }
+    this.room?.localParticipant.publishData(this.textEncoder.encode(JSON.stringify(obj)), { reliable: true });
   }
 
   /** Mutes audio input from the user. */
@@ -361,12 +388,9 @@ export class UltravoxSession extends EventTarget {
     this.dispatchEvent(new UltravoxSessionStatusChangedEvent());
   }
 
-  private sendData(obj: any) {
-    this.room?.localParticipant.publishData(this.textEncoder.encode(JSON.stringify(obj)), { reliable: true });
-  }
-
   private handleDataReceived(payload: Uint8Array, _participant: any) {
     const msg = JSON.parse(this.textDecoder.decode(payload));
+    this.dispatchEvent(new UltravoxDataMessageEvent(msg));
     if (msg.type === 'state') {
       const newState = msg.state;
       if (newState === UltravoxSessionStatus.SPEAKING && this.agentSourceNode === undefined) {
@@ -377,20 +401,14 @@ export class UltravoxSession extends EventTarget {
         this.setStatus(newState);
       }
     } else if (msg.type === 'transcript') {
-      const medium = msg.transcript.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
-      const transcript = new Transcript(msg.transcript.text, msg.transcript.final, Role.USER, medium);
-      this.addOrUpdateTranscript(transcript);
-    } else if (msg.type === 'voice_synced_transcript' || msg.type == 'agent_text_transcript') {
-      const medium = msg.type == 'agent_text_transcript' ? Medium.TEXT : Medium.VOICE;
-      if (msg.text != null) {
-        const newTranscript = new Transcript(msg.text, msg.final, Role.AGENT, medium);
-        this.addOrUpdateTranscript(newTranscript);
-      } else if (msg.delta != null) {
-        const lastTranscript = this._transcripts.length ? this._transcripts[this._transcripts.length - 1] : undefined;
-        if (lastTranscript && lastTranscript.speaker == Role.AGENT) {
-          const newTranscript = new Transcript(lastTranscript.text + msg.delta, msg.final, Role.AGENT, medium);
-          this.addOrUpdateTranscript(newTranscript);
-        }
+      const medium = msg.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
+      const role = msg.role == 'agent' ? Role.AGENT : Role.USER;
+      const ordinal = msg.ordinal;
+      const isFinal = msg.final;
+      if (msg.text) {
+        this.addOrUpdateTranscript(ordinal, medium, role, isFinal, msg.text);
+      } else if (msg.delta) {
+        this.addOrUpdateTranscript(ordinal, medium, role, isFinal, undefined, msg.delta);
       }
     } else if (msg.type == 'client_tool_invocation') {
       this.invokeClientTool(msg.toolName, msg.invocationId, msg.parameters);
@@ -399,16 +417,22 @@ export class UltravoxSession extends EventTarget {
     }
   }
 
-  private addOrUpdateTranscript(transcript: Transcript) {
-    if (this._transcripts.length) {
-      const lastTranscript = this._transcripts[this._transcripts.length - 1];
-      if (lastTranscript && !lastTranscript.isFinal && transcript.speaker === lastTranscript.speaker) {
-        this._transcripts[this._transcripts.length - 1] = transcript;
-      } else {
-        this._transcripts.push(transcript);
-      }
+  private addOrUpdateTranscript(
+    ordinal: number,
+    medium: Medium,
+    speaker: Role,
+    isFinal: boolean,
+    text?: string,
+    delta?: string,
+  ) {
+    while (this._transcripts.length < ordinal) {
+      this._transcripts.push(null);
+    }
+    if (this._transcripts.length == ordinal) {
+      this._transcripts.push(new Transcript(text || delta || '', isFinal, speaker, medium));
     } else {
-      this._transcripts.push(transcript);
+      const priorText = this._transcripts[ordinal]?.text || '';
+      this._transcripts[ordinal] = new Transcript(text || priorText + (delta || ''), isFinal, speaker, medium);
     }
     this.dispatchEvent(new UltravoxTranscriptsChangedEvent());
   }
