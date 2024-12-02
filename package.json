@@ -18,7 +18,8 @@
     "build": "pnpm run prepare && pnpm run format",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "tshy"
+    "prepare": "tshy",
+    "serve-example": "http-server"
   },
   "dependencies": {
     "livekit-client": "^2.5.1"
@@ -26,7 +27,8 @@
   "devDependencies": {
     "prettier": "^3.3.3",
     "tshy": "^3.0.2",
-    "typescript": "^5.1.3"
+    "typescript": "^5.1.3",
+    "http-server": "^14.1.1"
   },
   "prettier": {
     "printWidth": 120,
