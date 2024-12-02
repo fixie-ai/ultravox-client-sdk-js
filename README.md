@@ -2,6 +2,8 @@
 
 This is the web client library for [Ultravox](https://ultravox.ai).
 
+[![npm package](https://img.shields.io/npm/v/ultravox-client?label=ultravox-client&color=orange)](https://www.npmjs.com/package/ultravox-client)
+
 Written in TypeScript, this library allows you to easily integrate Ultravox's real-time, speech-to-speech AI into web applications.
 
 ## Quick Start
