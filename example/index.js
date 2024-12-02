@@ -4,7 +4,7 @@ import { UltravoxSession } from '../dist/esm/index.js';
 class UltravoxExample {
   constructor() {
     this.uvSession = new UltravoxSession();
-    this.setupEventListeners();
+    this.setUpEventListeners();
   }
 
   appendUpdate(target, message) {
@@ -24,7 +24,7 @@ class UltravoxExample {
     }
   }
 
-  setupEventListeners() {
+  setUpEventListeners() {
     // Set up session event listeners
     this.uvSession.addEventListener('status', (event) => {
       this.appendUpdate('callStatus', `Session status changed: ${this.uvSession.status}`);
