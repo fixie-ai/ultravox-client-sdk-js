@@ -57,3 +57,21 @@ Transcripts are an array of transcript objects. Each transcript has the followin
 | isFinal  | boolean | True if the transcript represents a complete utterance. False if it is a fragment of an utterance that is still underway. |
 | speaker  | Role    | Either "user" or "agent". Denotes who was speaking.                                                                       |
 | medium   | Medium  | Either "voice" or "text". Denotes how the message was sent.                                                               |
+
+## Testing SDK Versions
+
+This repo includes a basic example application that can be used with the SDK. The example application requires running a local web server:
+
+```bash
+pnpm serve-example
+```
+
+Then navigate your browser to `http://localhost:8080/example/` and use the example.
+
+### Missing version.js file
+
+If build fails because it cannot find './version.js', run the following:
+
+```bash
+pnpm publish --dry-run --git-checks=false
+```
