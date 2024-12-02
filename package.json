@@ -1,6 +1,6 @@
 {
   "name": "ultravox-client",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": false,
   "files": [
     "dist"
@@ -15,6 +15,7 @@
     }
   },
   "scripts": {
+    "prepublishOnly": "node -p \"'export const ULTRAVOX_SDK_VERSION = ' + JSON.stringify(require('./package.json').version) + ';'\" > src/version.ts",
     "build": "pnpm run prepare && pnpm run format",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
