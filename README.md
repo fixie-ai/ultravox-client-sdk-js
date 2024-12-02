@@ -66,8 +66,8 @@ pnpm serve-example
 
 Then navigate your browser to `http://localhost:8080/example/` and use the example.
 
-
 ### Missing version.js file
+
 If build fails because it cannot find './version.js', run the following:
 
 ```bash
