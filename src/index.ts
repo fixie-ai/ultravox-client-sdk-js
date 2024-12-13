@@ -238,7 +238,13 @@ export class UltravoxSession extends EventTarget {
     if (obj.type == undefined) {
       throw new Error('Data must have a type field');
     }
-    this.room?.localParticipant.publishData(this.textEncoder.encode(JSON.stringify(obj)), { reliable: true });
+    const msgStr = JSON.stringify(obj);
+    const msgBytes = this.textEncoder.encode(msgStr);
+    if (msgBytes.length > 1024) {
+      this.socket?.send(msgStr);
+    } else {
+      this.room?.localParticipant.publishData(msgBytes, { reliable: true });
+    }
   }
 
   /** Mutes audio input from the user. */
