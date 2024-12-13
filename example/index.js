@@ -47,6 +47,7 @@ class UltravoxExample {
     }
 
     this.appendUpdate('callStatus', 'Starting call');
+    this.uvSession.registerToolImplementation('getSecretMenu', this.getSecretMenu);
     this.uvSession.joinCall(joinUrl);
     this.appendUpdate('callStatus', `Joining call: ${this.uvSession.status}`);
   };
@@ -55,6 +56,23 @@ class UltravoxExample {
     this.appendUpdate('callStatus', 'Ending call');
     this.uvSession.leaveCall();
   };
+
+  getSecretMenu(params) {
+    const result = {
+      date: new Date().toISOString(),
+      specialItems: [
+        {
+          name: 'Banana smoothie',
+          price: 3.99,
+        },
+        {
+          name: 'Butter pecan ice cream (one scoop)',
+          price: 1.99,
+        },
+      ],
+    };
+    return JSON.stringify(result);
+  }
 }
 
 // Initialize the example when the DOM is loaded
