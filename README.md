@@ -17,7 +17,7 @@ session.joinCall('wss://your-call-join-url');
 session.leaveCall();
 ```
 
-_Note: Join URL's are created using the Ultravox API. See the [docs](https://fixie-ai.github.io/ultradox/) for more info._
+_Note: Join URL's are created using the Ultravox API. See the [docs](https://docs.fixie.ai) for more info._
 
 ## Events
 
