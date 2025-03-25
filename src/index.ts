@@ -492,7 +492,7 @@ export class UltravoxSession extends EventTarget {
     } else {
       const resultString = result.result;
       const responseType = result.responseType;
-      const agentReaction = result.agentReaction;
+      const agentReaction = result.agentReaction ?? AgentReaction.SPEAKS;
 
       if (typeof resultString !== 'string' || typeof responseType !== 'string') {
         this.sendData({
