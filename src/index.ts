@@ -39,6 +39,13 @@ export enum Medium {
   TEXT = 'text',
 }
 
+/* Agent reactions to tool calls. */
+export enum AgentReaction {
+  SPEAKS = 'speaks',
+  LISTENS = 'listens',
+  SPEAKSONCE = 'speaks-once',
+}
+
 /** A transcription of a single utterance. */
 export class Transcript {
   constructor(
@@ -86,7 +93,14 @@ export class UltravoxDataMessageEvent extends Event {
   }
 }
 
-type ClientToolReturnType = string | { result: string; responseType: string };
+type ClientToolReturnType =
+  | string
+  | {
+      result: string;
+      responseType: string;
+      agentReaction?: AgentReaction;
+    };
+
 export type ClientToolImplementation = (parameters: {
   [key: string]: any;
 }) => ClientToolReturnType | Promise<ClientToolReturnType>;
@@ -475,6 +489,8 @@ export class UltravoxSession extends EventTarget {
     } else {
       const resultString = result.result;
       const responseType = result.responseType;
+      const agentReaction = result.agentReaction;
+
       if (typeof resultString !== 'string' || typeof responseType !== 'string') {
         this.sendData({
           type: 'client_tool_result',
@@ -484,7 +500,18 @@ export class UltravoxSession extends EventTarget {
             'Client tool result must be a string or an object with string "result" and "responseType" properties.',
         });
       } else {
-        this.sendData({ type: 'client_tool_result', invocationId, result: resultString, responseType });
+        const payload: any = {
+          type: 'client_tool_result',
+          invocationId,
+          result: resultString,
+          responseType,
+        };
+
+        if (agentReaction) {
+          payload.agent_reaction = agentReaction;
+        }
+
+        this.sendData(payload);
       }
     }
   }
