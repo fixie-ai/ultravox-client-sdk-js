@@ -508,12 +508,8 @@ export class UltravoxSession extends EventTarget {
           invocationId,
           result: resultString,
           responseType,
+          agentReaction,
         };
-
-        if (agentReaction) {
-          payload.agent_reaction = agentReaction;
-        }
-
         this.sendData(payload);
       }
     }
