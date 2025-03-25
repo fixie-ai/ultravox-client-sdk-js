@@ -39,6 +39,16 @@ export enum Medium {
   TEXT = 'text',
 }
 
+/* How the agent should proceed after a tool invocation. */
+export enum AgentReaction {
+  /* The agent should speak after the tool invocation. This is the default and is recommended for tools that retrieve information for the agent to act on. */
+  SPEAKS = 'speaks',
+  /* The agent should listen after the tool invocation. This is recommended for tools the user is expected to act on, such as certain clear UI changes. */
+  LISTENS = 'listens',
+  /* The agent should speak after the tool invocation if and only if it did not speak immediately before the tool invocation. This is recommended for tools whose primary purpose is a side effect like recording information collected from the user. */
+  SPEAKS_ONCE = 'speaks-once',
+}
+
 /** A transcription of a single utterance. */
 export class Transcript {
   constructor(
@@ -86,7 +96,14 @@ export class UltravoxDataMessageEvent extends Event {
   }
 }
 
-type ClientToolReturnType = string | { result: string; responseType: string };
+type ClientToolReturnType =
+  | string
+  | {
+      result: string;
+      responseType: string;
+      agentReaction?: AgentReaction;
+    };
+
 export type ClientToolImplementation = (parameters: {
   [key: string]: any;
 }) => ClientToolReturnType | Promise<ClientToolReturnType>;
@@ -475,6 +492,8 @@ export class UltravoxSession extends EventTarget {
     } else {
       const resultString = result.result;
       const responseType = result.responseType;
+      const agentReaction = result.agentReaction ?? AgentReaction.SPEAKS;
+
       if (typeof resultString !== 'string' || typeof responseType !== 'string') {
         this.sendData({
           type: 'client_tool_result',
@@ -484,7 +503,14 @@ export class UltravoxSession extends EventTarget {
             'Client tool result must be a string or an object with string "result" and "responseType" properties.',
         });
       } else {
-        this.sendData({ type: 'client_tool_result', invocationId, result: resultString, responseType });
+        const payload: any = {
+          type: 'client_tool_result',
+          invocationId,
+          result: resultString,
+          responseType,
+          agentReaction,
+        };
+        this.sendData(payload);
       }
     }
   }
