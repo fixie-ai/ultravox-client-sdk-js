@@ -39,11 +39,14 @@ export enum Medium {
   TEXT = 'text',
 }
 
-/* Agent reactions to tool calls. */
+/* How the agent should proceed after a tool invocation. */
 export enum AgentReaction {
+  /* The agent should speak after the tool invocation. This is the default and is recommended for tools that retrieve information for the agent to act on. */
   SPEAKS = 'speaks',
+  /* The agent should listen after the tool invocation. This is recommended for tools the user is expected to act on, such as certain clear UI changes. */
   LISTENS = 'listens',
-  SPEAKSONCE = 'speaks-once',
+  /* The agent should speak after the tool invocation if and only if it did not speak immediately before the tool invocation. This is recommended for tools whose primary purpose is a side effect like recording information collected from the user. */
+  SPEAKS_ONCE = 'speaks-once',
 }
 
 /** A transcription of a single utterance. */
