@@ -101,7 +101,8 @@ type ClientToolReturnType =
   | {
       result: string;
       responseType: string;
-      agentReaction?: AgentReaction;
+      agentReaction?: AgentReaction | null;
+      updateCallState?: Record<string, unknown> | null;
     };
 
 export type ClientToolImplementation = (parameters: {
@@ -490,11 +491,7 @@ export class UltravoxSession extends EventTarget {
     if (typeof result === 'string') {
       this.sendData({ type: 'client_tool_result', invocationId, result });
     } else {
-      const resultString = result.result;
-      const responseType = result.responseType;
-      const agentReaction = result.agentReaction ?? AgentReaction.SPEAKS;
-
-      if (typeof resultString !== 'string' || typeof responseType !== 'string') {
+      if (typeof result.result !== 'string' || typeof result.responseType !== 'string') {
         this.sendData({
           type: 'client_tool_result',
           invocationId,
@@ -503,14 +500,11 @@ export class UltravoxSession extends EventTarget {
             'Client tool result must be a string or an object with string "result" and "responseType" properties.',
         });
       } else {
-        const payload: any = {
+        this.sendData({
           type: 'client_tool_result',
           invocationId,
-          result: resultString,
-          responseType,
-          agentReaction,
-        };
-        this.sendData(payload);
+          ...result,
+        });
       }
     }
   }
