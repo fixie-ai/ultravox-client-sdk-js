@@ -244,11 +244,11 @@ export class UltravoxSession extends EventTarget {
   }
 
   /** Sends a message via text. */
-  sendText(text: string) {
+  sendText(text: string, deferResponse?: boolean) {
     if (!UltravoxSession.CONNECTED_STATUSES.has(this._status)) {
       throw new Error(`Cannot send text while not connected. Current status is ${this._status}.`);
     }
-    this.sendData({ type: 'input_text_message', text });
+    this.sendData({ type: 'input_text_message', text, deferResponse });
   }
 
   /* Sends an arbitrary data message to the server. See https://docs.ultravox.ai/datamessages for message types. */
