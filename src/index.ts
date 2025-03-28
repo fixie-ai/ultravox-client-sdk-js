@@ -490,22 +490,20 @@ export class UltravoxSession extends EventTarget {
   private handleClientToolResult(invocationId: string, result: any) {
     if (typeof result === 'string') {
       this.sendData({ type: 'client_tool_result', invocationId, result });
+    } else if (typeof result.result !== 'string' || typeof result.responseType !== 'string') {
+      this.sendData({
+        type: 'client_tool_result',
+        invocationId,
+        errorType: 'implementation-error',
+        errorMessage:
+          'Client tool result must be a string or an object with string "result" and "responseType" properties.',
+      });
     } else {
-      if (typeof result.result !== 'string' || typeof result.responseType !== 'string') {
-        this.sendData({
-          type: 'client_tool_result',
-          invocationId,
-          errorType: 'implementation-error',
-          errorMessage:
-            'Client tool result must be a string or an object with string "result" and "responseType" properties.',
-        });
-      } else {
-        this.sendData({
-          type: 'client_tool_result',
-          invocationId,
-          ...result,
-        });
-      }
+      this.sendData({
+        type: 'client_tool_result',
+        invocationId,
+        ...result,
+      });
     }
   }
 
