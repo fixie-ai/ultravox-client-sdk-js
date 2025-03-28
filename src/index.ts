@@ -101,7 +101,8 @@ type ClientToolReturnType =
   | {
       result: string;
       responseType: string;
-      agentReaction?: AgentReaction;
+      agentReaction?: AgentReaction | null;
+      updateCallState?: Record<string, unknown> | null;
     };
 
 export type ClientToolImplementation = (parameters: {
@@ -243,11 +244,11 @@ export class UltravoxSession extends EventTarget {
   }
 
   /** Sends a message via text. */
-  sendText(text: string) {
+  sendText(text: string, deferResponse?: boolean) {
     if (!UltravoxSession.CONNECTED_STATUSES.has(this._status)) {
       throw new Error(`Cannot send text while not connected. Current status is ${this._status}.`);
     }
-    this.sendData({ type: 'input_text_message', text });
+    this.sendData({ type: 'input_text_message', text, deferResponse });
   }
 
   /* Sends an arbitrary data message to the server. See https://docs.ultravox.ai/datamessages for message types. */
@@ -489,29 +490,20 @@ export class UltravoxSession extends EventTarget {
   private handleClientToolResult(invocationId: string, result: any) {
     if (typeof result === 'string') {
       this.sendData({ type: 'client_tool_result', invocationId, result });
+    } else if (typeof result.result !== 'string' || typeof result.responseType !== 'string') {
+      this.sendData({
+        type: 'client_tool_result',
+        invocationId,
+        errorType: 'implementation-error',
+        errorMessage:
+          'Client tool result must be a string or an object with string "result" and "responseType" properties.',
+      });
     } else {
-      const resultString = result.result;
-      const responseType = result.responseType;
-      const agentReaction = result.agentReaction ?? AgentReaction.SPEAKS;
-
-      if (typeof resultString !== 'string' || typeof responseType !== 'string') {
-        this.sendData({
-          type: 'client_tool_result',
-          invocationId,
-          errorType: 'implementation-error',
-          errorMessage:
-            'Client tool result must be a string or an object with string "result" and "responseType" properties.',
-        });
-      } else {
-        const payload: any = {
-          type: 'client_tool_result',
-          invocationId,
-          result: resultString,
-          responseType,
-          agentReaction,
-        };
-        this.sendData(payload);
-      }
+      this.sendData({
+        type: 'client_tool_result',
+        invocationId,
+        ...result,
+      });
     }
   }
 
