@@ -34,6 +34,17 @@ class UltravoxExample {
       this.appendUpdate('callTranscript', this.uvSession.transcripts);
     });
 
+    this.uvSession.addEventListener('video_track_subscribed', (event) => {
+      const videoElement = event.videoElement;
+      videoElement.autoplay = true;
+      videoElement.style.position = 'fixed';
+      videoElement.style.bottom = '0';
+      videoElement.style.right = '0';
+      videoElement.style.width = '600px';
+      document.body.appendChild(videoElement);
+      this.appendUpdate('callStatus', 'Video track subscribed');
+    });
+
     // Set up button click handlers
     document.getElementById('startCall').onclick = this.startCall.bind(this);
     document.getElementById('endCall').onclick = this.endCall.bind(this);
