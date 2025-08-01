@@ -96,6 +96,12 @@ export class UltravoxDataMessageEvent extends Event {
   }
 }
 
+export class UltravoxVideoTrackSubscribedEvent extends Event {
+  constructor(readonly videoElement: HTMLVideoElement) {
+    super('video_track_subscribed');
+  }
+}
+
 type ClientToolReturnType =
   | string
   | {
@@ -130,6 +136,7 @@ export class UltravoxSession extends EventTarget {
   private readonly registeredTools: Map<string, ClientToolImplementation> = new Map();
   private socket?: WebSocket;
   private room?: Room;
+  private videoElement?: HTMLVideoElement;
   private audioElement = new Audio();
   private localAudioTrack?: LocalAudioTrack;
   private micSourceNode?: MediaStreamAudioSourceNode;
@@ -152,13 +159,16 @@ export class UltravoxSession extends EventTarget {
   constructor({
     audioContext,
     experimentalMessages,
+    videoElement,
   }: {
     audioContext?: AudioContext;
     experimentalMessages?: Set<string>;
+    videoElement?: HTMLVideoElement;
   } = {}) {
     super();
     this.audioContext = audioContext || new AudioContext();
     this.experimentalMessages = experimentalMessages || new Set();
+    this.videoElement = videoElement;
   }
 
   /** Returns all transcripts for the current session. */
@@ -387,20 +397,29 @@ export class UltravoxSession extends EventTarget {
     this.micSourceNode = undefined;
     this.agentSourceNode?.disconnect();
     this.agentSourceNode = undefined;
+    this.videoElement?.pause();
     this.audioElement.pause();
     this.audioElement.srcObject = null;
     this.setStatus(UltravoxSessionStatus.DISCONNECTED);
   }
 
   private handleTrackSubscribed(track: RemoteTrack) {
-    const audioTrack = track as RemoteAudioTrack;
-    audioTrack.attach(this.audioElement);
-    if (track.mediaStream) {
-      this.agentSourceNode = this.audioContext.createMediaStreamSource(track.mediaStream);
-    }
-    if (this.delayedSpeakingState) {
-      this.delayedSpeakingState = false;
-      this.setStatus(UltravoxSessionStatus.SPEAKING);
+    if (track.kind === 'video') {
+      if (!this.videoElement) {
+        this.videoElement = document.createElement('video');
+      }
+      track.attach(this.videoElement);
+      this.dispatchEvent(new UltravoxVideoTrackSubscribedEvent(this.videoElement));
+    } else if (track.kind === 'audio') {
+      const audioTrack = track as RemoteAudioTrack;
+      audioTrack.attach(this.audioElement);
+      if (track.mediaStream) {
+        this.agentSourceNode = this.audioContext.createMediaStreamSource(track.mediaStream);
+      }
+      if (this.delayedSpeakingState) {
+        this.delayedSpeakingState = false;
+        this.setStatus(UltravoxSessionStatus.SPEAKING);
+      }
     }
   }
 
