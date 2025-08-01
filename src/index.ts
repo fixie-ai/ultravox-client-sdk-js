@@ -410,7 +410,6 @@ export class UltravoxSession extends EventTarget {
       }
       track.attach(this.videoElement);
       this.dispatchEvent(new UltravoxVideoTrackSubscribedEvent(this.videoElement));
-      return;
     } else if (track.kind === 'audio') {
       const audioTrack = track as RemoteAudioTrack;
       audioTrack.attach(this.audioElement);
