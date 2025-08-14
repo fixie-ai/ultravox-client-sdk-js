@@ -150,7 +150,7 @@ export class UltravoxSession extends EventTarget {
 
   private _isMicMuted: boolean = false;
   private _isSpeakerMuted: boolean = false;
-  private initialMicMuted: boolean | null = null;
+  private _initialMicMuted: boolean | null = null;
 
   /**
    * Constructor for UltravoxSession.
@@ -209,7 +209,7 @@ export class UltravoxSession extends EventTarget {
       this.room.localParticipant.setMicrophoneEnabled(!muted);
     } else {
       // Store for connection
-      this.initialMicMuted = muted;
+      this._initialMicMuted = muted;
     }
   }
 
@@ -395,9 +395,9 @@ export class UltravoxSession extends EventTarget {
     const opts = { name: 'audio', simulcast: false, source: Track.Source.Microphone };
     this.room.localParticipant.publishTrack(this.localAudioTrack, opts);
 
-    if (this.initialMicMuted !== null) {
-      this.room.localParticipant.setMicrophoneEnabled(!this.initialMicMuted);
-      this.initialMicMuted = null; // Reset after applying
+    if (this._initialMicMuted !== null) {
+      this.room.localParticipant.setMicrophoneEnabled(!this._initialMicMuted);
+      this._initialMicMuted = null; // Reset after applying
     }
 
     this.setStatus(UltravoxSessionStatus.IDLE);
