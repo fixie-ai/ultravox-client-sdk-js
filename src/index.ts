@@ -277,28 +277,18 @@ export class UltravoxSession extends EventTarget {
 
   /** Mutes audio input from the user. */
   muteMic(): void {
-    if (!this.room?.localParticipant) {
-      throw new Error('Cannot muteMic.');
-    }
     this._isMicMuted = true;
-    this.room.localParticipant.setMicrophoneEnabled(false);
+    this.localAudioTrack?.mute();
   }
 
   /** Unmutes audio input from the user. */
   unmuteMic(): void {
-    if (!this.room?.localParticipant) {
-      throw new Error('Cannot unmuteMic.');
-    }
     this._isMicMuted = false;
-    this.room.localParticipant.setMicrophoneEnabled(true);
+    this.localAudioTrack?.unmute();
   }
 
   /** Toggles the mute state of the user's audio input. */
   toggleMicMute(): void {
-    if (!this.room?.localParticipant) {
-      throw new Error('Cannot toggle mic mute.');
-    }
-
     if (this.isMicMuted) {
       this.unmuteMic();
     } else {
@@ -308,36 +298,26 @@ export class UltravoxSession extends EventTarget {
 
   /** Mutes audio output from the agent. */
   muteSpeaker(): void {
-    if (!this.room?.remoteParticipants) {
-      throw new Error('Cannot muteSpeaker.');
-    }
     this._isSpeakerMuted = true;
-    this.room.remoteParticipants.forEach((participant) => {
+    this.room?.remoteParticipants.forEach((participant) => {
       participant.audioTrackPublications.forEach((publication) => {
-        publication.track?.setMuted(true);
+        publication.setEnabled(!this._isSpeakerMuted);
       });
     });
   }
 
   /** Unmutes audio output from the agent. */
   unmuteSpeaker(): void {
-    if (!this.room?.remoteParticipants) {
-      throw new Error('Cannot unmuteSpeaker.');
-    }
     this._isSpeakerMuted = false;
-    this.room.remoteParticipants.forEach((participant) => {
+    this.room?.remoteParticipants.forEach((participant) => {
       participant.audioTrackPublications.forEach((publication) => {
-        publication.track?.setMuted(false);
+        publication.setEnabled(!this._isSpeakerMuted);
       });
     });
   }
 
   /** Toggles the mute state of the agent's output audio. */
   toggleSpeakerMute(): void {
-    if (!this.room?.remoteParticipants) {
-      throw new Error('Cannot toggle speaker mute.');
-    }
-
     if (this.isSpeakerMuted) {
       this.unmuteSpeaker();
     } else {
@@ -356,6 +336,11 @@ export class UltravoxSession extends EventTarget {
     //  - https://github.com/livekit/components-js/pull/855
     //
     this.room = new Room({ webAudioMix: false });
+    this.room.on(RoomEvent.TrackSubscribed, (_track, publication) => {
+      if (publication.kind == Track.Kind.Audio) {
+        publication.setEnabled(!this.isSpeakerMuted);
+      }
+    });
     this.room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => this.handleTrackSubscribed(track));
     this.room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant: any) =>
       this.handleDataReceived(payload, participant),
@@ -363,6 +348,9 @@ export class UltravoxSession extends EventTarget {
     const [track, _] = await Promise.all([createLocalAudioTrack(), this.room.connect(msg.roomUrl, msg.token)]);
     this.localAudioTrack = track;
     this.localAudioTrack.setAudioContext(this.audioContext);
+    if (this.isMicMuted) {
+      this.localAudioTrack.mute();
+    }
 
     if ([UltravoxSessionStatus.DISCONNECTED, UltravoxSessionStatus.DISCONNECTING].includes(this.status)) {
       // We've been stopped while waiting for the mic permission (during createLocalTracks).
