@@ -60,6 +60,8 @@ export class Transcript {
     readonly speaker: Role,
     /* The medium through which the utterance was emitted. */
     readonly medium: Medium,
+    /* The ordinal for sorting the transcript */
+    readonly ordinal: number,
   ) {}
 }
 
@@ -460,10 +462,10 @@ export class UltravoxSession extends EventTarget {
       this._transcripts.push(null);
     }
     if (this._transcripts.length == ordinal) {
-      this._transcripts.push(new Transcript(text || delta || '', isFinal, speaker, medium));
+      this._transcripts.push(new Transcript(text || delta || '', isFinal, speaker, medium, ordinal));
     } else {
       const priorText = this._transcripts[ordinal]?.text || '';
-      this._transcripts[ordinal] = new Transcript(text || priorText + (delta || ''), isFinal, speaker, medium);
+      this._transcripts[ordinal] = new Transcript(text || priorText + (delta || ''), isFinal, speaker, medium, ordinal);
     }
     this.dispatchEvent(new UltravoxTranscriptsChangedEvent());
   }
