@@ -17,6 +17,8 @@ export enum UltravoxSessionStatus {
   DISCONNECTING = 'disconnecting',
   /* The client is attempting to connect to the session. */
   CONNECTING = 'connecting',
+  /* The server has disconnected from the call. */
+  IDLE = 'idle',
   /* The client is connected and the server is listening for voice input. */
   LISTENING = 'listening',
   /* The client is connected and the server is considering its response. The user can still interrupt. */
