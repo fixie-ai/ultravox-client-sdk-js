@@ -17,7 +17,7 @@ export enum UltravoxSessionStatus {
   DISCONNECTING = 'disconnecting',
   /* The client is attempting to connect to the session. */
   CONNECTING = 'connecting',
-  /* The client is connected to the session and the server is warming up. */
+  /* The server has disconnected from the call. */
   IDLE = 'idle',
   /* The client is connected and the server is listening for voice input. */
   LISTENING = 'listening',
@@ -79,13 +79,6 @@ export class UltravoxTranscriptsChangedEvent extends Event {
   }
 }
 
-/* Event emitted by an UltravoxSession when an experimental message is received. */
-export class UltravoxExperimentalMessageEvent extends Event {
-  constructor(readonly message: any) {
-    super('experimental_message');
-  }
-}
-
 /**
  * Event emitted by an UltravoxSession when any data message is received, including those typically
  * handled by this SDK.
@@ -94,7 +87,7 @@ export class UltravoxExperimentalMessageEvent extends Event {
  */
 export class UltravoxDataMessageEvent extends Event {
   constructor(readonly message: any) {
-    super('data_message');
+    super('data_message', { cancelable: true });
   }
 }
 
@@ -142,13 +135,11 @@ export class UltravoxSession extends EventTarget {
   private audioElement = new Audio();
   private localAudioTrack?: LocalAudioTrack;
   private micSourceNode?: MediaStreamAudioSourceNode;
-  private agentSourceNode?: MediaStreamAudioSourceNode;
-  private delayedSpeakingState = false;
   private readonly textDecoder = new TextDecoder();
   private readonly textEncoder = new TextEncoder();
 
   private readonly audioContext: AudioContext;
-  private readonly experimentalMessages: Set<string>;
+  private readonly additionalMessages: Set<string>;
 
   private _isMicMuted: boolean = false;
   private _isSpeakerMuted: boolean = false;
@@ -156,20 +147,20 @@ export class UltravoxSession extends EventTarget {
   /**
    * Constructor for UltravoxSession.
    * @param audioContext An AudioContext to use for audio processing. If not provided, a new AudioContext will be created.
-   * @param experimentalMessages A set of experimental message types to enable. Empty by default.
+   * @param additionalMessages A set of additional message types to enable. Empty by default.
    */
   constructor({
     audioContext,
-    experimentalMessages,
+    additionalMessages,
     videoElement,
   }: {
     audioContext?: AudioContext;
-    experimentalMessages?: Set<string>;
+    additionalMessages?: Set<string>;
     videoElement?: HTMLVideoElement;
   } = {}) {
     super();
     this.audioContext = audioContext || new AudioContext();
-    this.experimentalMessages = experimentalMessages || new Set();
+    this.additionalMessages = additionalMessages || new Set();
     this.videoElement = videoElement;
   }
 
@@ -229,8 +220,8 @@ export class UltravoxSession extends EventTarget {
     }
     url.searchParams.set('clientVersion', uvClientVersion);
     url.searchParams.set('apiVersion', '1');
-    if (this.experimentalMessages) {
-      url.searchParams.set('experimentalMessages', Array.from(this.experimentalMessages.values()).join(','));
+    if (this.additionalMessages) {
+      url.searchParams.set('additionalMessages', Array.from(this.additionalMessages.values()).join(','));
     }
     joinUrl = url.toString();
     this.setStatus(UltravoxSessionStatus.CONNECTING);
@@ -329,14 +320,6 @@ export class UltravoxSession extends EventTarget {
 
   private async handleSocketMessage(event: MessageEvent) {
     const msg = JSON.parse(event.data);
-    // We attach the Livekit audio to an audio element so that we can mute the audio
-    // when the agent is not speaking. For now, disable Livekit's WebAudio mixing
-    // to avoid the audio playing twice:
-    //
-    // References:
-    //  - https://docs.livekit.io/guides/migrate-from-v1/#Javascript-Typescript
-    //  - https://github.com/livekit/components-js/pull/855
-    //
     this.room = new Room({ webAudioMix: false });
     this.room.on(RoomEvent.TrackSubscribed, (_track, publication) => {
       if (publication.kind == Track.Kind.Audio) {
@@ -347,6 +330,10 @@ export class UltravoxSession extends EventTarget {
     this.room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant: any) =>
       this.handleDataReceived(payload, participant),
     );
+
+    this.audioContext.resume();
+    this.audioElement.play();
+
     const [track, _] = await Promise.all([createLocalAudioTrack(), this.room.connect(msg.roomUrl, msg.token)]);
     this.localAudioTrack = track;
     this.localAudioTrack.setAudioContext(this.audioContext);
@@ -356,19 +343,14 @@ export class UltravoxSession extends EventTarget {
 
     if ([UltravoxSessionStatus.DISCONNECTED, UltravoxSessionStatus.DISCONNECTING].includes(this.status)) {
       // We've been stopped while waiting for the mic permission (during createLocalTracks).
-      await this.disconnect();
       return;
     }
-
-    this.audioContext.resume();
-    this.audioElement.play();
     if (this.localAudioTrack.mediaStream) {
       this.micSourceNode = this.audioContext.createMediaStreamSource(this.localAudioTrack.mediaStream);
     }
 
     const opts = { name: 'audio', simulcast: false, source: Track.Source.Microphone };
     this.room.localParticipant.publishTrack(this.localAudioTrack, opts);
-    this.setStatus(UltravoxSessionStatus.IDLE);
   }
 
   private async handleSocketClose(event: CloseEvent) {
@@ -385,8 +367,6 @@ export class UltravoxSession extends EventTarget {
     this.socket = undefined;
     this.micSourceNode?.disconnect();
     this.micSourceNode = undefined;
-    this.agentSourceNode?.disconnect();
-    this.agentSourceNode = undefined;
     this.videoElement?.pause();
     this.audioElement.pause();
     this.audioElement.srcObject = null;
@@ -403,13 +383,6 @@ export class UltravoxSession extends EventTarget {
     } else if (track.kind === 'audio') {
       const audioTrack = track as RemoteAudioTrack;
       audioTrack.attach(this.audioElement);
-      if (track.mediaStream) {
-        this.agentSourceNode = this.audioContext.createMediaStreamSource(track.mediaStream);
-      }
-      if (this.delayedSpeakingState) {
-        this.delayedSpeakingState = false;
-        this.setStatus(UltravoxSessionStatus.SPEAKING);
-      }
     }
   }
 
@@ -423,30 +396,23 @@ export class UltravoxSession extends EventTarget {
 
   private handleDataReceived(payload: Uint8Array, _participant: any) {
     const msg = JSON.parse(this.textDecoder.decode(payload));
-    this.dispatchEvent(new UltravoxDataMessageEvent(msg));
-    if (msg.type === 'state') {
-      const newState = msg.state;
-      if (newState === UltravoxSessionStatus.SPEAKING && this.agentSourceNode === undefined) {
-        // Skip the first speaking state, before we've attached the audio element.
-        // handleTrackSubscribed will be called soon and will change the state.
-        this.delayedSpeakingState = true;
-      } else {
-        this.setStatus(newState);
+    const runDefault = this.dispatchEvent(new UltravoxDataMessageEvent(msg));
+    if (runDefault) {
+      if (msg.type === 'state') {
+        this.setStatus(msg.state);
+      } else if (msg.type === 'transcript') {
+        const medium = msg.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
+        const role = msg.role == 'agent' ? Role.AGENT : Role.USER;
+        const ordinal = msg.ordinal;
+        const isFinal = msg.final;
+        if (msg.text) {
+          this.addOrUpdateTranscript(ordinal, medium, role, isFinal, msg.text);
+        } else if (msg.delta) {
+          this.addOrUpdateTranscript(ordinal, medium, role, isFinal, undefined, msg.delta);
+        }
+      } else if (msg.type == 'client_tool_invocation') {
+        this.invokeClientTool(msg.toolName, msg.invocationId, msg.parameters);
       }
-    } else if (msg.type === 'transcript') {
-      const medium = msg.medium == 'voice' ? Medium.VOICE : Medium.TEXT;
-      const role = msg.role == 'agent' ? Role.AGENT : Role.USER;
-      const ordinal = msg.ordinal;
-      const isFinal = msg.final;
-      if (msg.text) {
-        this.addOrUpdateTranscript(ordinal, medium, role, isFinal, msg.text);
-      } else if (msg.delta) {
-        this.addOrUpdateTranscript(ordinal, medium, role, isFinal, undefined, msg.delta);
-      }
-    } else if (msg.type == 'client_tool_invocation') {
-      this.invokeClientTool(msg.toolName, msg.invocationId, msg.parameters);
-    } else if (this.experimentalMessages) {
-      this.dispatchEvent(new UltravoxExperimentalMessageEvent(msg));
     }
   }
 
