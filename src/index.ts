@@ -39,6 +39,16 @@ export enum Medium {
   TEXT = 'text',
 }
 
+/* Urgency level for text messages, controlling when/how they're processed. */
+export enum Urgency {
+  /* Interrupts the agent if speaking and starts generation immediately. */
+  IMMEDIATE = 'immediate',
+  /* Doesn't interrupt but starts generation at the next opportunity. This is the default. */
+  SOON = 'soon',
+  /* Message is considered during the next natural generation without forcing a new generation. */
+  LATER = 'later',
+}
+
 /* How the agent should proceed after a tool invocation. */
 export enum AgentReaction {
   /* The agent should speak after the tool invocation. This is the default and is recommended for tools that retrieve information for the agent to act on. */
@@ -246,12 +256,20 @@ export class UltravoxSession extends EventTarget {
     this.sendData({ type: 'set_output_medium', medium });
   }
 
-  /** Sends a message via text. */
-  sendText(text: string, deferResponse?: boolean) {
+  /**
+   * Sends a message via text.
+   * @param text The text message to send.
+   * @param deferResponse If true, the agent will not respond until explicitly triggered.
+   * @param urgency Controls when/how the message is processed:
+   *   - 'immediate': Interrupts the agent if speaking and starts generation immediately.
+   *   - 'soon' (default): Doesn't interrupt but starts generation at the next opportunity.
+   *   - 'later': Message is considered during the next natural generation without forcing a new generation.
+   */
+  sendText(text: string, deferResponse?: boolean, urgency?: Urgency) {
     if (!UltravoxSession.CONNECTED_STATUSES.has(this._status)) {
       throw new Error(`Cannot send text while not connected. Current status is ${this._status}.`);
     }
-    this.sendData({ type: 'input_text_message', text, deferResponse });
+    this.sendData({ type: 'input_text_message', text, deferResponse, urgency });
   }
 
   /* Sends an arbitrary data message to the server. See https://docs.ultravox.ai/datamessages for message types. */
