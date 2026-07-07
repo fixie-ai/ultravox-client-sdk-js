@@ -139,15 +139,6 @@ export class UltravoxSession extends EventTarget {
     UltravoxSessionStatus.SPEAKING,
   ]);
 
-  // Reasons that indicate the room closed because the call ended (as opposed to a dropped connection).
-  private static EXPECTED_DISCONNECT_REASONS = new Set([
-    DisconnectReason.CLIENT_INITIATED,
-    DisconnectReason.ROOM_DELETED,
-    DisconnectReason.ROOM_CLOSED,
-    DisconnectReason.PARTICIPANT_REMOVED,
-    DisconnectReason.SERVER_SHUTDOWN,
-  ]);
-
   private readonly _transcripts: Array<Transcript | null> = [];
   private _status: UltravoxSessionStatus = UltravoxSessionStatus.DISCONNECTED;
   private readonly registeredTools: Map<string, ClientToolImplementation> = new Map();
@@ -412,10 +403,11 @@ export class UltravoxSession extends EventTarget {
     if (this.isStopped()) {
       return;
     }
-    if (reason === undefined || !UltravoxSession.EXPECTED_DISCONNECT_REASONS.has(reason)) {
-      // LiveKit gave up on the media connection (undefined reason means its internal reconnect
-      // attempts were exhausted). The call cannot continue without it, so we surface the failure
-      // and hang up rather than leaving the session in a stale "live" state.
+    if (reason !== DisconnectReason.CLIENT_INITIATED) {
+      // The server ends calls by closing our socket, not by closing the room, so a room disconnect
+      // we didn't initiate means the media connection was lost. (An undefined reason means LiveKit
+      // exhausted its internal reconnect attempts.) The call cannot continue without media, so we
+      // surface the failure and hang up rather than leaving the session in a stale "live" state.
       const reasonName = reason === undefined ? 'reconnect attempts exhausted' : DisconnectReason[reason];
       this.dispatchEvent(new UltravoxErrorEvent(new Error(`Call media connection lost unexpectedly (${reasonName})`)));
     }
