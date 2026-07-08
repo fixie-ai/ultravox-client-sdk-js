@@ -247,8 +247,11 @@ export class UltravoxSession extends EventTarget {
    * typically shortly after the call connects (or after the user grants mic permission).
    */
   get micSourceNode(): MediaStreamAudioSourceNode | undefined {
-    if (!this._micSourceNode && this.localAudioTrack?.mediaStream) {
-      this._micSourceNode = this.audioContext.createMediaStreamSource(this.localAudioTrack.mediaStream);
+    // Built from mediaStreamTrack rather than the track's mediaStream because the latter is
+    // internal to livekit-client.
+    const track = this.localAudioTrack?.mediaStreamTrack;
+    if (!this._micSourceNode && track) {
+      this._micSourceNode = this.audioContext.createMediaStreamSource(new MediaStream([track]));
     }
     return this._micSourceNode;
   }
@@ -260,8 +263,9 @@ export class UltravoxSession extends EventTarget {
    * shortly after the call connects.
    */
   get agentSourceNode(): MediaStreamAudioSourceNode | undefined {
-    if (!this._agentSourceNode && this.agentAudioTrack?.mediaStream) {
-      this._agentSourceNode = this.audioContext.createMediaStreamSource(this.agentAudioTrack.mediaStream);
+    const track = this.agentAudioTrack?.mediaStreamTrack;
+    if (!this._agentSourceNode && track) {
+      this._agentSourceNode = this.audioContext.createMediaStreamSource(new MediaStream([track]));
     }
     return this._agentSourceNode;
   }
@@ -289,6 +293,8 @@ export class UltravoxSession extends EventTarget {
     if (this._status !== UltravoxSessionStatus.DISCONNECTED) {
       throw new Error('Cannot join a new call while already in a call');
     }
+    // Clear any previous call's transcripts in case this session instance is being reused.
+    this._transcripts.length = 0;
     const url = new URL(joinUrl);
     let uvClientVersion = `web_${ULTRAVOX_SDK_VERSION}`;
     if (clientVersion) {
@@ -351,18 +357,18 @@ export class UltravoxSession extends EventTarget {
     if (obj.type == undefined) {
       throw new Error('Data must have a type field');
     }
+    // The socket exists from joinCall on and the room exists from the server's room_info
+    // response on, so requiring both keeps behavior independent of which transport the size
+    // check below happens to pick.
+    if (!this.room || !this.socket) {
+      throw new Error(`Cannot send data while not connected. Current status is ${this._status}.`);
+    }
     const msgStr = JSON.stringify(obj);
     const msgBytes = this.textEncoder.encode(msgStr);
     if (msgBytes.length > 1024) {
       // Messages that could exceed the WebRTC data channel's practical size limit go via websocket.
-      if (!this.socket) {
-        throw new Error(`Cannot send data while not connected. Current status is ${this._status}.`);
-      }
       this.socket.send(msgStr);
     } else {
-      if (!this.room) {
-        throw new Error(`Cannot send data while not connected. Current status is ${this._status}.`);
-      }
       this.room.localParticipant.publishData(msgBytes, { reliable: true });
     }
   }
@@ -549,6 +555,12 @@ export class UltravoxSession extends EventTarget {
     } else if (track.kind === 'audio') {
       const audioTrack = track as RemoteAudioTrack;
       audioTrack.attach(this.audioElement);
+      if (this.agentAudioTrack !== audioTrack) {
+        // A new track (e.g. after a full media reconnect) means a cached source node is bound
+        // to a dead stream, so it must be recreated on next access.
+        this._agentSourceNode?.disconnect();
+        this._agentSourceNode = undefined;
+      }
       this.agentAudioTrack = audioTrack;
     }
   }

@@ -96,22 +96,30 @@ session.sendText('The user tapped the checkout button', { urgency: TextMessageUr
 ```
 
 Arbitrary [data messages](https://docs.ultravox.ai/datamessages) can also be sent with
-`session.sendData(message)`, and every message received from the server is emitted as a
-`data_message` event on the session (calling `preventDefault()` on that event suppresses the
-SDK's default handling of the message).
+`session.sendData(message)`, and every data message received after the call connects is emitted
+as a `data_message` event on the session (calling `preventDefault()` on that event suppresses
+the SDK's default handling of the message).
 
 ## Speech Indicators and Audio Analysis
 
 The session exposes Web Audio source nodes for both sides of the conversation, for example for
 attaching an `AnalyserNode` to drive speech indicators. Both are undefined until the relevant
 audio exists — typically shortly after the call connects (and, for the mic, after the user grants
-permission) — and belong to the session's `AudioContext` (which you can pass to the constructor
-if you'd rather own it).
+permission). The nodes belong to the session's `AudioContext`, and Web Audio nodes from different
+contexts cannot be connected, so provide the context yourself when you want to attach your own
+nodes:
 
 ```javascript
+const audioContext = new AudioContext();
+const session = new UltravoxSession({ audioContext });
+
+// Then, once the call's audio is flowing:
 const analyser = audioContext.createAnalyser();
-session.agentSourceNode.connect(analyser); // Or micSourceNode for the user's audio.
+session.agentSourceNode?.connect(analyser); // Or micSourceNode for the user's audio.
 ```
+
+Note that the nodes produce data only while the `AudioContext` is running; if the browser blocked
+audio pending a user gesture, resume the context after the next gesture.
 
 ## Testing SDK Versions
 

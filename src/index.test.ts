@@ -13,7 +13,7 @@ import {
 } from './index.js';
 
 const { FakeRoom, micTracks, micGate } = vi.hoisted(() => {
-  const micTracks: Array<{ stopped: boolean; muted: boolean; stop: () => void }> = [];
+  const micTracks: Array<{ stopped: boolean; muted: boolean; stop: () => void; mediaStreamTrack: object }> = [];
   /** When set, createLocalAudioTrack blocks on this, like a pending mic permission prompt. */
   const micGate: { current?: Promise<void> } = {};
   /** In-memory stand-in for a livekit-client Room. State strings match livekit's ConnectionState. */
@@ -22,10 +22,10 @@ const { FakeRoom, micTracks, micGate } = vi.hoisted(() => {
 
     state = 'disconnected';
     connectOptions: any;
-    publishedData: Uint8Array[] = [];
+    publishedData: Array<{ payload: Uint8Array; opts: any }> = [];
     localParticipant = {
       publishTrack: async () => {},
-      publishData: (payload: Uint8Array, _opts: any) => this.publishedData.push(payload),
+      publishData: (payload: Uint8Array, opts: any) => this.publishedData.push({ payload, opts }),
     };
     remoteParticipants = new Map();
     private readonly handlers = new Map<string, Array<(...args: any[]) => void>>();
@@ -77,7 +77,7 @@ vi.mock('livekit-client', async (importOriginal) => ({
       stop: () => {
         track.stopped = true;
       },
-      mediaStream: {},
+      mediaStreamTrack: {},
     };
     micTracks.push(track);
     return track;
@@ -119,6 +119,12 @@ beforeEach(() => {
       pause() {}
     },
   );
+  vi.stubGlobal(
+    'MediaStream',
+    class {
+      constructor(readonly tracks: unknown[]) {}
+    },
+  );
 });
 
 afterEach(() => {
@@ -128,9 +134,20 @@ afterEach(() => {
 
 /** Creates a session and drives it through the join handshake, capturing emitted events. */
 async function joinCall(sessionOptions: ConstructorParameters<typeof UltravoxSession>[0] = {}) {
+  const sourceNodes: Array<{ stream: { tracks: unknown[] }; disconnected: boolean }> = [];
   const audioContext = {
     resume: () => {},
-    createMediaStreamSource: () => ({ disconnect: () => {} }),
+    createMediaStreamSource: (stream: { tracks: unknown[] }) => {
+      const node = {
+        stream,
+        disconnected: false,
+        disconnect: () => {
+          node.disconnected = true;
+        },
+      };
+      sourceNodes.push(node);
+      return node;
+    },
   } as unknown as AudioContext;
   const session = new UltravoxSession({ audioContext, ...sessionOptions });
   const errors: Error[] = [];
@@ -142,7 +159,7 @@ async function joinCall(sessionOptions: ConstructorParameters<typeof UltravoxSes
   socket.onmessage!({ data: JSON.stringify({ roomUrl: 'wss://room.example.test', token: 'token' }) });
   await vi.waitFor(() => expect(FakeRoom.instances[FakeRoom.instances.length - 1]?.state).toBe('connected'));
   const room = FakeRoom.instances[FakeRoom.instances.length - 1]!;
-  return { session, socket, room, errors, statuses };
+  return { session, socket, room, errors, statuses, sourceNodes };
 }
 
 const textEncoder = new TextEncoder();
@@ -155,7 +172,7 @@ function receiveDataMessage(room: InstanceType<typeof FakeRoom>, message: object
 
 /** Returns all data messages the session has published to the room, decoded. */
 function publishedMessages(room: InstanceType<typeof FakeRoom>): any[] {
-  return room.publishedData.map((payload) => JSON.parse(textDecoder.decode(payload)));
+  return room.publishedData.map((entry) => JSON.parse(textDecoder.decode(entry.payload)));
 }
 
 /** Like joinCall, but also brings the session to the LISTENING status. */
@@ -265,12 +282,22 @@ test('joinCall throws while already in a call', async () => {
   expect(() => session.joinCall('wss://example.test/join2')).toThrow('Cannot join a new call');
 });
 
-test('sendText sends a user_text_message with the given urgency and placement', async () => {
+test.each([
+  {
+    urgency: TextMessageUrgency.IMMEDIATE,
+    placement: TextMessagePlacement.PREVIOUS_PAUSE,
+    expected: { urgency: 'immediate', placement: 'previous_pause' },
+  },
+  {
+    urgency: TextMessageUrgency.SOON,
+    placement: TextMessagePlacement.BEFORE,
+    expected: { urgency: 'soon', placement: 'before' },
+  },
+])('sendText sends a user_text_message with urgency $expected.urgency', async ({ urgency, placement, expected }) => {
   const { session, room } = await joinConnectedCall();
-  session.sendText('Hello', { urgency: TextMessageUrgency.IMMEDIATE, placement: TextMessagePlacement.PREVIOUS_PAUSE });
-  expect(publishedMessages(room)).toEqual([
-    { type: 'user_text_message', text: 'Hello', urgency: 'immediate', placement: 'previous_pause' },
-  ]);
+  session.sendText('Hello', { urgency, placement });
+  expect(publishedMessages(room)).toEqual([{ type: 'user_text_message', text: 'Hello', ...expected }]);
+  expect(room.publishedData.map((entry) => entry.opts)).toEqual([{ reliable: true }]);
 });
 
 test('sendText defers urgency and placement to server defaults when omitted', async () => {
@@ -312,9 +339,19 @@ test('sendData requires a type field', async () => {
   expect(() => session.sendData({ text: 'Hello' })).toThrow('type');
 });
 
-test('sendData throws after the call ends', async () => {
+test.each([
+  { name: 'small (room-bound)', message: { type: 'ping', timestamp: 1 } },
+  { name: 'large (socket-bound)', message: { type: 'user_text_message', text: 'a'.repeat(2000) } },
+])('sendData throws after the call ends for $name messages', async ({ message }) => {
   const { session } = await joinConnectedCall();
   await session.leaveCall();
+  expect(() => session.sendData(message)).toThrow('Cannot send data');
+});
+
+test('sendData throws before the room exists, regardless of message size', async () => {
+  const session = new UltravoxSession({ audioContext: {} as AudioContext });
+  session.joinCall('wss://example.test/join'); // The socket exists now, but room_info hasn't arrived.
+  expect(() => session.sendData({ type: 'user_text_message', text: 'a'.repeat(2000) })).toThrow('Cannot send data');
   expect(() => session.sendData({ type: 'ping', timestamp: 1 })).toThrow('Cannot send data');
 });
 
@@ -476,16 +513,71 @@ test('speaker mute disables remote audio publications', async () => {
 });
 
 test('exposes mic and agent audio source nodes while audio is flowing', async () => {
-  const { session, room } = await joinCall();
+  const { session, room, sourceNodes } = await joinCall();
   expect(session.agentSourceNode).toBeUndefined();
   await vi.waitFor(() => expect(session.micSourceNode).toBeDefined());
   expect(session.micSourceNode).toBe(session.micSourceNode); // The node is stable across accesses.
-  room.emit(
-    RoomEvent.TrackSubscribed,
-    { kind: 'audio', attach: () => {}, mediaStream: {} },
-    { kind: 'audio', setEnabled: () => {} },
-  );
+  const agentTrack = { kind: 'audio', attach: () => {}, mediaStreamTrack: {} };
+  room.emit(RoomEvent.TrackSubscribed, agentTrack, { kind: 'audio', setEnabled: () => {} });
   expect(session.agentSourceNode).toBeDefined();
+  // Each node must be built from the corresponding track's stream.
+  expect(sourceNodes.map((node) => node.stream.tracks)).toEqual([
+    [micTracks[0]!.mediaStreamTrack],
+    [agentTrack.mediaStreamTrack],
+  ]);
   await session.leaveCall();
   expect([session.micSourceNode, session.agentSourceNode]).toEqual([undefined, undefined]);
+  expect(sourceNodes.map((node) => node.disconnected)).toEqual([true, true]);
+});
+
+test('recreates the agent source node when a new agent track arrives (e.g. after a media reconnect)', async () => {
+  const { session, room } = await joinCall();
+  const subscribeAgentTrack = (track: object) =>
+    room.emit(RoomEvent.TrackSubscribed, track, { kind: 'audio', setEnabled: () => {} });
+  const firstTrack = { kind: 'audio', attach: () => {}, mediaStreamTrack: {} };
+  subscribeAgentTrack(firstTrack);
+  const firstNode = session.agentSourceNode;
+  subscribeAgentTrack(firstTrack); // Resubscribing the same track must not invalidate the node.
+  expect(session.agentSourceNode).toBe(firstNode);
+  subscribeAgentTrack({ kind: 'audio', attach: () => {}, mediaStreamTrack: {} });
+  expect(session.agentSourceNode).not.toBe(firstNode);
+  expect((firstNode as any).disconnected).toBe(true);
+});
+
+test('tolerates blocked audio autoplay during join', async () => {
+  vi.stubGlobal(
+    'Audio',
+    class {
+      srcObject: unknown = null;
+      play() {
+        return Promise.reject(new Error('autoplay blocked'));
+      }
+      pause() {}
+    },
+  );
+  const audioContext = { resume: () => Promise.reject(new Error('autoplay blocked')) } as unknown as AudioContext;
+  const { session, room } = await joinCall({ audioContext });
+  receiveDataMessage(room, { type: 'state', state: 'listening' });
+  expect(session.status).toBe(UltravoxSessionStatus.LISTENING);
+});
+
+test('a session can be reused for a new call with fresh transcripts', async () => {
+  const { session, room } = await joinConnectedCall();
+  receiveDataMessage(room, { type: 'transcript', role: 'user', medium: 'text', ordinal: 0, final: true, text: 'Hi' });
+  await session.leaveCall();
+  session.joinCall('wss://example.test/join');
+  const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+  socket.onmessage!({ data: JSON.stringify({ roomUrl: 'wss://room.example.test', token: 'token' }) });
+  await vi.waitFor(() => expect(FakeRoom.instances[FakeRoom.instances.length - 1]?.state).toBe('connected'));
+  const secondRoom = FakeRoom.instances[FakeRoom.instances.length - 1]!;
+  expect(session.transcripts).toEqual([]);
+  receiveDataMessage(secondRoom, {
+    type: 'transcript',
+    role: 'agent',
+    medium: 'voice',
+    ordinal: 0,
+    final: true,
+    text: 'Hey',
+  });
+  expect(session.transcripts).toEqual([new Transcript('Hey', true, Role.AGENT, Medium.VOICE, 0)]);
 });
