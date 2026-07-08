@@ -172,6 +172,7 @@ test('leaveCall resolves only after an in-flight disconnect completes', async ()
 test.each([
   { reason: undefined, expected: 'reconnect attempts exhausted' },
   { reason: DisconnectReason.SIGNAL_CLOSE, expected: 'SIGNAL_CLOSE' },
+  { reason: 999 as DisconnectReason, expected: '999' }, // An enum value this client doesn't know.
 ])('emits a single error when the media connection is lost ($expected)', async ({ reason, expected }) => {
   const { session, socket, room, errors } = await joinCall();
   room.emit(RoomEvent.Disconnected, reason);

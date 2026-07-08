@@ -407,7 +407,7 @@ export class UltravoxSession extends EventTarget {
       // we didn't initiate means the media connection was lost. (An undefined reason means LiveKit
       // exhausted its internal reconnect attempts.) The call cannot continue without media, so we
       // surface the failure and hang up rather than leaving the session in a stale "live" state.
-      const reasonName = reason === undefined ? 'reconnect attempts exhausted' : DisconnectReason[reason];
+      const reasonName = reason === undefined ? 'reconnect attempts exhausted' : (DisconnectReason[reason] ?? reason);
       this.dispatchEvent(new UltravoxErrorEvent(new Error(`Call media connection lost unexpectedly (${reasonName})`)));
     }
     await this.disconnect();
