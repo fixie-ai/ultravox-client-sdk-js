@@ -360,15 +360,16 @@ export class UltravoxSession extends EventTarget {
       createLocalAudioTrack(),
       this.room.connect(msg.roomUrl, msg.token, { rtcConfig: this.rtcConfig }),
     ]);
+    if (this.isStopped()) {
+      // We've been stopped while waiting for the mic permission (during createLocalTracks).
+      // The track must be stopped here to end audio capture: disconnect() ran before it existed.
+      track.stop();
+      return;
+    }
     this.localAudioTrack = track;
     this.localAudioTrack.setAudioContext(this.audioContext);
     if (this.isMicMuted) {
       this.localAudioTrack.mute();
-    }
-
-    if (this.isStopped()) {
-      // We've been stopped while waiting for the mic permission (during createLocalTracks).
-      return;
     }
     if (this.localAudioTrack.mediaStream) {
       this.micSourceNode = this.audioContext.createMediaStreamSource(this.localAudioTrack.mediaStream);

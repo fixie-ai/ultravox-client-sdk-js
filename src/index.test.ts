@@ -2,7 +2,10 @@ import { DisconnectReason, RoomEvent } from 'livekit-client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { UltravoxErrorEvent, UltravoxSession, UltravoxSessionStatus } from './index.js';
 
-const { FakeRoom } = vi.hoisted(() => {
+const { FakeRoom, micTracks, micGate } = vi.hoisted(() => {
+  const micTracks: Array<{ stopped: boolean }> = [];
+  /** When set, createLocalAudioTrack blocks on this, like a pending mic permission prompt. */
+  const micGate: { current?: Promise<void> } = {};
   /** In-memory stand-in for a livekit-client Room. State strings match livekit's ConnectionState. */
   class FakeRoom {
     static instances: FakeRoom[] = [];
@@ -39,19 +42,27 @@ const { FakeRoom } = vi.hoisted(() => {
       this.emit('disconnected', 1); // DisconnectReason.CLIENT_INITIATED, mirroring the real Room.
     }
   }
-  return { FakeRoom };
+  return { FakeRoom, micTracks, micGate };
 });
 
 vi.mock('livekit-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('livekit-client')>()),
   Room: FakeRoom,
-  createLocalAudioTrack: async () => ({
-    setAudioContext: () => {},
-    mute: () => {},
-    unmute: () => {},
-    stop: () => {},
-    mediaStream: undefined,
-  }),
+  createLocalAudioTrack: async () => {
+    await micGate.current;
+    const track = {
+      stopped: false,
+      setAudioContext: () => {},
+      mute: () => {},
+      unmute: () => {},
+      stop: () => {
+        track.stopped = true;
+      },
+      mediaStream: undefined,
+    };
+    micTracks.push(track);
+    return track;
+  },
 }));
 
 class FakeWebSocket {
@@ -75,6 +86,8 @@ class FakeWebSocket {
 beforeEach(() => {
   FakeRoom.instances = [];
   FakeWebSocket.instances = [];
+  micTracks.length = 0;
+  micGate.current = undefined;
   vi.stubGlobal('WebSocket', FakeWebSocket);
   vi.stubGlobal(
     'Audio',
@@ -152,6 +165,16 @@ test('emits an error when the socket closes normally during a media reconnect', 
   socket.onclose!({ wasClean: true, code: 1000, reason: '' });
   await vi.waitFor(() => expect(session.status).toBe(UltravoxSessionStatus.DISCONNECTED));
   expect(errors.map((error) => error.message)).toEqual(['Call ended due to unstable media connection']);
+});
+
+test('stops the mic track when the call ends while awaiting mic permission', async () => {
+  let grantMicPermission!: () => void;
+  micGate.current = new Promise<void>((resolve) => (grantMicPermission = resolve));
+  const { session, socket } = await joinCall();
+  socket.onclose!({ wasClean: true, code: 1000, reason: '' });
+  await vi.waitFor(() => expect(session.status).toBe(UltravoxSessionStatus.DISCONNECTED));
+  grantMicPermission();
+  await vi.waitFor(() => expect(micTracks.map((track) => track.stopped)).toEqual([true]));
 });
 
 test('leaveCall resolves only after an in-flight disconnect completes', async () => {
