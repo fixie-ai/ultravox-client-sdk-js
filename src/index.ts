@@ -352,16 +352,23 @@ export class UltravoxSession extends EventTarget {
     });
   }
 
-  /* Sends an arbitrary data message to the server. See https://docs.ultravox.ai/datamessages for message types. */
+  /**
+   * Sends an arbitrary data message to the server. See https://docs.ultravox.ai/datamessages
+   * for message types. If the session is not connected, the message is dropped with a console
+   * warning.
+   */
   sendData(obj: any) {
     if (obj.type == undefined) {
       throw new Error('Data must have a type field');
     }
     // The socket exists from joinCall on and the room exists from the server's room_info
     // response on, so requiring both keeps behavior independent of which transport the size
-    // check below happens to pick.
+    // check below happens to pick. Undeliverable messages warn rather than throw: the loss is
+    // typically visible through other means (call events, transcripts, etc.), and a throw
+    // would punish fire-and-forget callers more than it would help.
     if (!this.room || !this.socket) {
-      throw new Error(`Cannot send data while not connected. Current status is ${this._status}.`);
+      console.warn(`Dropping '${obj.type}' data message while not connected. Current status is ${this._status}.`);
+      return;
     }
     const msgStr = JSON.stringify(obj);
     const msgBytes = this.textEncoder.encode(msgStr);
@@ -621,7 +628,7 @@ export class UltravoxSession extends EventTarget {
   private invokeClientTool(toolName: string, invocationId: string, parameters: { [key: string]: any }) {
     const tool = this.registeredTools.get(toolName);
     if (!tool) {
-      this.sendClientToolResult({
+      this.sendData({
         type: 'client_tool_result',
         invocationId,
         errorType: 'undefined',
@@ -646,9 +653,9 @@ export class UltravoxSession extends EventTarget {
 
   private handleClientToolResult(invocationId: string, result: any) {
     if (typeof result === 'string') {
-      this.sendClientToolResult({ type: 'client_tool_result', invocationId, result });
+      this.sendData({ type: 'client_tool_result', invocationId, result });
     } else if (typeof result.result !== 'string' || typeof result.responseType !== 'string') {
-      this.sendClientToolResult({
+      this.sendData({
         type: 'client_tool_result',
         invocationId,
         errorType: 'implementation-error',
@@ -656,7 +663,7 @@ export class UltravoxSession extends EventTarget {
           'Client tool result must be a string or an object with string "result" and "responseType" properties.',
       });
     } else {
-      this.sendClientToolResult({
+      this.sendData({
         type: 'client_tool_result',
         invocationId,
         ...result,
@@ -665,20 +672,11 @@ export class UltravoxSession extends EventTarget {
   }
 
   private handleClientToolFailure(invocationId: string, error: any) {
-    this.sendClientToolResult({
+    this.sendData({
       type: 'client_tool_result',
       invocationId,
       errorType: 'implementation-error',
       errorMessage: error instanceof Error ? error.message : undefined,
     });
-  }
-
-  private sendClientToolResult(resultMessage: any) {
-    try {
-      this.sendData(resultMessage);
-    } catch (e) {
-      // The call likely ended while the tool was running, so no one can receive the result.
-      console.warn('Failed to send client tool result:', e);
-    }
   }
 }

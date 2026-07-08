@@ -342,17 +342,24 @@ test('sendData requires a type field', async () => {
 test.each([
   { name: 'small (room-bound)', message: { type: 'ping', timestamp: 1 } },
   { name: 'large (socket-bound)', message: { type: 'user_text_message', text: 'a'.repeat(2000) } },
-])('sendData throws after the call ends for $name messages', async ({ message }) => {
-  const { session } = await joinConnectedCall();
+])('sendData warns and drops $name messages after the call ends', async ({ message }) => {
+  const { session, socket, room } = await joinConnectedCall();
   await session.leaveCall();
-  expect(() => session.sendData(message)).toThrow('Cannot send data');
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  session.sendData(message);
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(publishedMessages(room)).toEqual([]);
+  expect(socket.sent).toEqual([]);
 });
 
-test('sendData throws before the room exists, regardless of message size', async () => {
+test('sendData warns and drops messages before the room exists, regardless of message size', async () => {
   const session = new UltravoxSession({ audioContext: {} as AudioContext });
   session.joinCall('wss://example.test/join'); // The socket exists now, but room_info hasn't arrived.
-  expect(() => session.sendData({ type: 'user_text_message', text: 'a'.repeat(2000) })).toThrow('Cannot send data');
-  expect(() => session.sendData({ type: 'ping', timestamp: 1 })).toThrow('Cannot send data');
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  session.sendData({ type: 'user_text_message', text: 'a'.repeat(2000) });
+  session.sendData({ type: 'ping', timestamp: 1 });
+  expect(warn).toHaveBeenCalledTimes(2);
+  expect(FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!.sent).toEqual([]);
 });
 
 test('handles data messages arriving over the socket', async () => {
