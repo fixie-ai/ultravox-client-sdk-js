@@ -1,9 +1,19 @@
 import { DisconnectReason, RoomEvent } from 'livekit-client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { UltravoxErrorEvent, UltravoxSession, UltravoxSessionStatus } from './index.js';
+import {
+  Medium,
+  Role,
+  TextMessagePlacement,
+  TextMessageUrgency,
+  Transcript,
+  UltravoxDataMessageEvent,
+  UltravoxErrorEvent,
+  UltravoxSession,
+  UltravoxSessionStatus,
+} from './index.js';
 
 const { FakeRoom, micTracks, micGate } = vi.hoisted(() => {
-  const micTracks: Array<{ stopped: boolean }> = [];
+  const micTracks: Array<{ stopped: boolean; muted: boolean; stop: () => void }> = [];
   /** When set, createLocalAudioTrack blocks on this, like a pending mic permission prompt. */
   const micGate: { current?: Promise<void> } = {};
   /** In-memory stand-in for a livekit-client Room. State strings match livekit's ConnectionState. */
@@ -12,7 +22,11 @@ const { FakeRoom, micTracks, micGate } = vi.hoisted(() => {
 
     state = 'disconnected';
     connectOptions: any;
-    localParticipant = { publishTrack: async () => {}, publishData: () => {} };
+    publishedData: Uint8Array[] = [];
+    localParticipant = {
+      publishTrack: async () => {},
+      publishData: (payload: Uint8Array, _opts: any) => this.publishedData.push(payload),
+    };
     remoteParticipants = new Map();
     private readonly handlers = new Map<string, Array<(...args: any[]) => void>>();
 
@@ -52,13 +66,18 @@ vi.mock('livekit-client', async (importOriginal) => ({
     await micGate.current;
     const track = {
       stopped: false,
+      muted: false,
       setAudioContext: () => {},
-      mute: () => {},
-      unmute: () => {},
+      mute: () => {
+        track.muted = true;
+      },
+      unmute: () => {
+        track.muted = false;
+      },
       stop: () => {
         track.stopped = true;
       },
-      mediaStream: undefined,
+      mediaStream: {},
     };
     micTracks.push(track);
     return track;
@@ -71,12 +90,15 @@ class FakeWebSocket {
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: ((event: { wasClean: boolean; code: number; reason: string }) => void) | null = null;
   closed = false;
+  sent: string[] = [];
 
   constructor(readonly url: string) {
     FakeWebSocket.instances.push(this);
   }
 
-  send(_message: string) {}
+  send(message: string) {
+    this.sent.push(message);
+  }
 
   close() {
     this.closed = true;
@@ -101,6 +123,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /** Creates a session and drives it through the join handshake, capturing emitted events. */
@@ -122,13 +145,33 @@ async function joinCall(sessionOptions: ConstructorParameters<typeof UltravoxSes
   return { session, socket, room, errors, statuses };
 }
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+/** Delivers a data message to the session as if the server had sent it over the room's data channel. */
+function receiveDataMessage(room: InstanceType<typeof FakeRoom>, message: object) {
+  room.emit(RoomEvent.DataReceived, textEncoder.encode(JSON.stringify(message)));
+}
+
+/** Returns all data messages the session has published to the room, decoded. */
+function publishedMessages(room: InstanceType<typeof FakeRoom>): any[] {
+  return room.publishedData.map((payload) => JSON.parse(textDecoder.decode(payload)));
+}
+
+/** Like joinCall, but also brings the session to the LISTENING status. */
+async function joinConnectedCall() {
+  const call = await joinCall();
+  receiveDataMessage(call.room, { type: 'state', state: 'listening' });
+  return call;
+}
+
 test('passes rtcConfig through to the room connection', async () => {
   const rtcConfig: RTCConfiguration = { iceTransportPolicy: 'relay' };
   const { room } = await joinCall({ rtcConfig });
   expect(room.connectOptions).toEqual({ rtcConfig });
 });
 
-test('disconnects without an error when the socket closes normally', async () => {
+test('disconnects without an error when the server hangs up (normal socket close)', async () => {
   const { session, socket, errors, statuses } = await joinCall();
   socket.onclose!({ wasClean: true, code: 1000, reason: '' });
   await vi.waitFor(() => expect(session.status).toBe(UltravoxSessionStatus.DISCONNECTED));
@@ -202,4 +245,247 @@ test.each([
   await vi.waitFor(() => expect(session.status).toBe(UltravoxSessionStatus.DISCONNECTED));
   socket.onclose!({ wasClean: false, code: 1006, reason: '' }); // The socket death that follows is not a second error.
   expect(errors.map((error) => error.message)).toEqual([expect.stringContaining(expected)]);
+});
+
+test('reaches DISCONNECTED even when media teardown fails', async () => {
+  const { session, room } = await joinCall();
+  await vi.waitFor(() => expect(micTracks).toHaveLength(1));
+  micTracks[0]!.stop = () => {
+    throw new Error('stop failed');
+  };
+  room.disconnect = async () => {
+    throw new Error('disconnect failed');
+  };
+  await session.leaveCall();
+  expect(session.status).toBe(UltravoxSessionStatus.DISCONNECTED);
+});
+
+test('joinCall throws while already in a call', async () => {
+  const { session } = await joinCall();
+  expect(() => session.joinCall('wss://example.test/join2')).toThrow('Cannot join a new call');
+});
+
+test('sendText sends a user_text_message with the given urgency and placement', async () => {
+  const { session, room } = await joinConnectedCall();
+  session.sendText('Hello', { urgency: TextMessageUrgency.IMMEDIATE, placement: TextMessagePlacement.PREVIOUS_PAUSE });
+  expect(publishedMessages(room)).toEqual([
+    { type: 'user_text_message', text: 'Hello', urgency: 'immediate', placement: 'previous_pause' },
+  ]);
+});
+
+test('sendText defers urgency and placement to server defaults when omitted', async () => {
+  const { session, room } = await joinConnectedCall();
+  session.sendText('Hello');
+  expect(publishedMessages(room)).toEqual([{ type: 'user_text_message', text: 'Hello' }]);
+});
+
+test.each([
+  { deferResponse: true, urgency: 'later' },
+  { deferResponse: false, urgency: 'immediate' },
+])('sendText maps deprecated deferResponse=$deferResponse to urgency $urgency', async ({ deferResponse, urgency }) => {
+  const { session, room } = await joinConnectedCall();
+  session.sendText('Hello', deferResponse);
+  expect(publishedMessages(room)).toEqual([{ type: 'user_text_message', text: 'Hello', urgency }]);
+});
+
+test('sendText throws while not connected', async () => {
+  const { session } = await joinCall(); // No state message has arrived, so the session is still CONNECTING.
+  expect(() => session.sendText('Hello')).toThrow('Cannot send text');
+});
+
+test('setOutputMedium sends a set_output_medium message', async () => {
+  const { session, room } = await joinConnectedCall();
+  session.setOutputMedium(Medium.TEXT);
+  expect(publishedMessages(room)).toEqual([{ type: 'set_output_medium', medium: 'text' }]);
+});
+
+test('sendData routes messages over 1KB via the socket', async () => {
+  const { session, room, socket } = await joinConnectedCall();
+  const message = { type: 'user_text_message', text: 'a'.repeat(2000) };
+  session.sendData(message);
+  expect(publishedMessages(room)).toEqual([]);
+  expect(socket.sent.map((sent) => JSON.parse(sent))).toEqual([message]);
+});
+
+test('sendData requires a type field', async () => {
+  const { session } = await joinConnectedCall();
+  expect(() => session.sendData({ text: 'Hello' })).toThrow('type');
+});
+
+test('sendData throws after the call ends', async () => {
+  const { session } = await joinConnectedCall();
+  await session.leaveCall();
+  expect(() => session.sendData({ type: 'ping', timestamp: 1 })).toThrow('Cannot send data');
+});
+
+test('handles data messages arriving over the socket', async () => {
+  const { session, socket } = await joinCall();
+  socket.onmessage!({ data: JSON.stringify({ type: 'state', state: 'listening' }) });
+  expect(session.status).toBe(UltravoxSessionStatus.LISTENING);
+  expect(FakeRoom.instances).toHaveLength(1); // The message must not be treated as a second room_info.
+});
+
+test('state messages update the session status', async () => {
+  const { session, room, statuses } = await joinCall();
+  receiveDataMessage(room, { type: 'state', state: 'thinking' });
+  expect(session.status).toBe(UltravoxSessionStatus.THINKING);
+  expect(statuses).toEqual([UltravoxSessionStatus.CONNECTING, UltravoxSessionStatus.THINKING]);
+});
+
+test('transcript messages build the session transcripts', async () => {
+  const { session, room } = await joinConnectedCall();
+  let transcriptsEvents = 0;
+  session.addEventListener('transcripts', () => transcriptsEvents++);
+  const agentMessage = { type: 'transcript', role: 'agent', medium: 'voice', ordinal: 0, final: false };
+  receiveDataMessage(room, { ...agentMessage, delta: 'Hel' });
+  receiveDataMessage(room, { ...agentMessage, delta: 'lo' });
+  expect(session.transcripts).toEqual([new Transcript('Hello', false, Role.AGENT, Medium.VOICE, 0)]);
+  receiveDataMessage(room, { ...agentMessage, final: true, text: 'Hello!' });
+  receiveDataMessage(room, { type: 'transcript', role: 'user', medium: 'text', ordinal: 1, final: true, text: 'Hi' });
+  expect(session.transcripts).toEqual([
+    new Transcript('Hello!', true, Role.AGENT, Medium.VOICE, 0),
+    new Transcript('Hi', true, Role.USER, Medium.TEXT, 1),
+  ]);
+  expect(transcriptsEvents).toBe(4);
+});
+
+test('data_message events allow suppressing default handling', async () => {
+  const { session, room } = await joinConnectedCall();
+  const messages: any[] = [];
+  session.addEventListener('data_message', (event) => {
+    const dataMessageEvent = event as UltravoxDataMessageEvent;
+    messages.push(dataMessageEvent.message);
+    dataMessageEvent.preventDefault();
+  });
+  receiveDataMessage(room, { type: 'state', state: 'speaking' });
+  expect(messages).toEqual([{ type: 'state', state: 'speaking' }]);
+  expect(session.status).toBe(UltravoxSessionStatus.LISTENING); // Unchanged because default handling was suppressed.
+});
+
+test.each([
+  { name: 'a string result', result: 'ok', expected: { result: 'ok' } },
+  {
+    name: 'an object result',
+    result: { result: 'ok', responseType: 'hang-up', agentReaction: 'listens' },
+    expected: { result: 'ok', responseType: 'hang-up', agentReaction: 'listens' },
+  },
+  {
+    name: 'an invalid result',
+    result: 42,
+    expected: { errorType: 'implementation-error', errorMessage: expect.stringContaining('must be a string') },
+  },
+])('client tool invocations send a client_tool_result for $name', async ({ result, expected }) => {
+  const { room, session } = await joinConnectedCall();
+  const invocations: any[] = [];
+  session.registerToolImplementation('myTool', (async (parameters: any) => {
+    invocations.push(parameters);
+    return result;
+  }) as any);
+  receiveDataMessage(room, {
+    type: 'client_tool_invocation',
+    toolName: 'myTool',
+    invocationId: 'call_1',
+    parameters: { a: 1 },
+  });
+  await vi.waitFor(() =>
+    expect(publishedMessages(room)).toEqual([{ type: 'client_tool_result', invocationId: 'call_1', ...expected }]),
+  );
+  expect(invocations).toEqual([{ a: 1 }]);
+});
+
+test('client tool errors send an implementation-error result', async () => {
+  const { room, session } = await joinConnectedCall();
+  session.registerToolImplementation('myTool', () => {
+    throw new Error('boom');
+  });
+  receiveDataMessage(room, {
+    type: 'client_tool_invocation',
+    toolName: 'myTool',
+    invocationId: 'call_1',
+    parameters: {},
+  });
+  await vi.waitFor(() =>
+    expect(publishedMessages(room)).toEqual([
+      { type: 'client_tool_result', invocationId: 'call_1', errorType: 'implementation-error', errorMessage: 'boom' },
+    ]),
+  );
+});
+
+test('unregistered client tools send an undefined-error result', async () => {
+  const { room } = await joinConnectedCall();
+  receiveDataMessage(room, {
+    type: 'client_tool_invocation',
+    toolName: 'nope',
+    invocationId: 'call_1',
+    parameters: {},
+  });
+  expect(publishedMessages(room)).toEqual([
+    {
+      type: 'client_tool_result',
+      invocationId: 'call_1',
+      errorType: 'undefined',
+      errorMessage: expect.stringContaining('not registered'),
+    },
+  ]);
+});
+
+test('client tool results after the call ends are dropped without throwing', async () => {
+  const { room, session } = await joinConnectedCall();
+  let finishTool!: (result: string) => void;
+  session.registerToolImplementation('myTool', () => new Promise<string>((resolve) => (finishTool = resolve)));
+  receiveDataMessage(room, {
+    type: 'client_tool_invocation',
+    toolName: 'myTool',
+    invocationId: 'call_1',
+    parameters: {},
+  });
+  await session.leaveCall();
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  finishTool('ok');
+  await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+});
+
+test('mic mute is applied to the mic track', async () => {
+  const { session } = await joinCall();
+  await vi.waitFor(() => expect(micTracks).toHaveLength(1));
+  session.muteMic();
+  expect([session.isMicMuted, micTracks[0]!.muted]).toEqual([true, true]);
+  session.toggleMicMute();
+  expect([session.isMicMuted, micTracks[0]!.muted]).toEqual([false, false]);
+});
+
+test('muting before the mic track exists applies once it is created', async () => {
+  let grantMicPermission!: () => void;
+  micGate.current = new Promise<void>((resolve) => (grantMicPermission = resolve));
+  const { session } = await joinCall();
+  session.muteMic();
+  grantMicPermission();
+  await vi.waitFor(() => expect(micTracks.map((track) => track.muted)).toEqual([true]));
+});
+
+test('speaker mute disables remote audio publications', async () => {
+  const { session, room } = await joinConnectedCall();
+  const enabledChanges: boolean[] = [];
+  const publication = { setEnabled: (value: boolean) => enabledChanges.push(value) };
+  room.remoteParticipants.set('agent', { audioTrackPublications: new Map([['pub', publication]]) });
+  session.muteSpeaker();
+  expect(session.isSpeakerMuted).toBe(true);
+  session.unmuteSpeaker();
+  expect(session.isSpeakerMuted).toBe(false);
+  expect(enabledChanges).toEqual([false, true]);
+});
+
+test('exposes mic and agent audio source nodes while audio is flowing', async () => {
+  const { session, room } = await joinCall();
+  expect(session.agentSourceNode).toBeUndefined();
+  await vi.waitFor(() => expect(session.micSourceNode).toBeDefined());
+  expect(session.micSourceNode).toBe(session.micSourceNode); // The node is stable across accesses.
+  room.emit(
+    RoomEvent.TrackSubscribed,
+    { kind: 'audio', attach: () => {}, mediaStream: {} },
+    { kind: 'audio', setEnabled: () => {} },
+  );
+  expect(session.agentSourceNode).toBeDefined();
+  await session.leaveCall();
+  expect([session.micSourceNode, session.agentSourceNode]).toEqual([undefined, undefined]);
 });
