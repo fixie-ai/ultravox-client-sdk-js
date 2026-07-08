@@ -154,6 +154,21 @@ test('emits an error when the socket closes normally during a media reconnect', 
   expect(errors.map((error) => error.message)).toEqual(['Call ended due to unstable media connection']);
 });
 
+test('leaveCall resolves only after an in-flight disconnect completes', async () => {
+  const { session, socket, room } = await joinCall();
+  let releaseRoomDisconnect!: () => void;
+  room.disconnect = () => new Promise<void>((resolve) => (releaseRoomDisconnect = resolve));
+  socket.onclose!({ wasClean: true, code: 1000, reason: '' }); // Starts a teardown that blocks on the room.
+  expect(session.status).toBe(UltravoxSessionStatus.DISCONNECTING);
+  let left = false;
+  const leavePromise = session.leaveCall().then(() => (left = true));
+  await new Promise((resolve) => setTimeout(resolve));
+  expect(left).toBe(false);
+  releaseRoomDisconnect();
+  await leavePromise;
+  expect(session.status).toBe(UltravoxSessionStatus.DISCONNECTED);
+});
+
 test.each([
   { reason: undefined, expected: 'reconnect attempts exhausted' },
   { reason: DisconnectReason.SIGNAL_CLOSE, expected: 'SIGNAL_CLOSE' },

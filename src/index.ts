@@ -144,6 +144,7 @@ export class UltravoxSession extends EventTarget {
   private readonly registeredTools: Map<string, ClientToolImplementation> = new Map();
   private socket?: WebSocket;
   private room?: Room;
+  private disconnectPromise?: Promise<void>;
   private videoElement?: HTMLVideoElement;
   private audioElement = new Audio();
   private localAudioTrack?: LocalAudioTrack;
@@ -416,10 +417,18 @@ export class UltravoxSession extends EventTarget {
     return [UltravoxSessionStatus.DISCONNECTING, UltravoxSessionStatus.DISCONNECTED].includes(this._status);
   }
 
-  private async disconnect() {
-    if (this.isStopped()) {
-      return;
+  private disconnect(): Promise<void> {
+    if (this._status === UltravoxSessionStatus.DISCONNECTED) {
+      return Promise.resolve();
     }
+    // Reuse any in-flight teardown so that concurrent callers resolve only once it completes.
+    this.disconnectPromise ??= this.performDisconnect().finally(() => {
+      this.disconnectPromise = undefined;
+    });
+    return this.disconnectPromise;
+  }
+
+  private async performDisconnect() {
     this.setStatus(UltravoxSessionStatus.DISCONNECTING);
     this.localAudioTrack?.stop();
     this.localAudioTrack = undefined;
