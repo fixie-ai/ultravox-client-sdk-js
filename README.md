@@ -33,6 +33,27 @@ session.addEventListener('transcripts', (event) => {
 });
 ```
 
+There is also an `error` event emitted when a session ends unexpectedly, for example because the
+network dropped the call's media connection. It is emitted immediately before the session's final
+`status` events. (No `error` event is emitted when a call ends normally.)
+
+```javascript
+session.addEventListener('error', (event) => {
+  console.log('Session ended unexpectedly: ', event.error);
+});
+```
+
+## Unreliable Networks
+
+Some networks (especially certain residential routers) disrupt long-lived UDP flows, which can
+cause calls to drop after a minute or so even though other traffic appears healthy. If your users
+are affected, you can force call media through a TURN relay, which typically uses TCP or TLS on
+port 443 at the cost of slightly higher latency:
+
+```javascript
+const session = new UltravoxSession({ rtcConfig: { iceTransportPolicy: 'relay' } });
+```
+
 ## Session Status
 
 The session status is based on the `UltravoxSessionStatus` enum and can be one of the following:

@@ -34,6 +34,10 @@ class UltravoxExample {
       this.appendUpdate('callTranscript', this.uvSession.transcripts);
     });
 
+    this.uvSession.addEventListener('error', (event) => {
+      this.appendUpdate('callStatus', `Session ended unexpectedly: ${event.error.message}`);
+    });
+
     this.uvSession.addEventListener('video_track_subscribed', (event) => {
       const videoElement = event.videoElement;
       videoElement.autoplay = true;

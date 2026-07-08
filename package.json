@@ -9,6 +9,9 @@
     "dialects": [
       "esm"
     ],
+    "exclude": [
+      "src/**/*.test.ts"
+    ],
     "exports": {
       ".": "./src/index.ts",
       "./package.json": "./package.json"
@@ -20,16 +23,18 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "tshy",
-    "serve-example": "http-server"
+    "serve-example": "http-server",
+    "test": "vitest run"
   },
   "dependencies": {
     "livekit-client": "^2.16.1"
   },
   "devDependencies": {
+    "http-server": "^14.1.1",
     "prettier": "^3.7.4",
     "tshy": "^3.1.0",
     "typescript": "^5.9.3",
-    "http-server": "^14.1.1"
+    "vitest": "^4.1.10"
   },
   "prettier": {
     "printWidth": 120,

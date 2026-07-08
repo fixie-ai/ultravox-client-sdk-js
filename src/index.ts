@@ -1,5 +1,7 @@
 import {
+  ConnectionState,
   createLocalAudioTrack,
+  DisconnectReason,
   LocalAudioTrack,
   RemoteAudioTrack,
   RemoteTrack,
@@ -97,6 +99,17 @@ export class UltravoxVideoTrackSubscribedEvent extends Event {
   }
 }
 
+/**
+ * Event emitted by an UltravoxSession when the session ends unexpectedly, for example because
+ * the network dropped the call's media connection. It is emitted immediately before the
+ * session's final "status" events. No error event is emitted when a call ends normally.
+ */
+export class UltravoxErrorEvent extends Event {
+  constructor(readonly error: Error) {
+    super('error');
+  }
+}
+
 type ClientToolReturnType =
   | string
   | {
@@ -131,6 +144,7 @@ export class UltravoxSession extends EventTarget {
   private readonly registeredTools: Map<string, ClientToolImplementation> = new Map();
   private socket?: WebSocket;
   private room?: Room;
+  private disconnectPromise?: Promise<void>;
   private videoElement?: HTMLVideoElement;
   private audioElement = new Audio();
   private localAudioTrack?: LocalAudioTrack;
@@ -140,6 +154,7 @@ export class UltravoxSession extends EventTarget {
 
   private readonly audioContext: AudioContext;
   private readonly additionalMessages: Set<string>;
+  private readonly rtcConfig?: RTCConfiguration;
 
   private _isMicMuted: boolean = false;
   private _isSpeakerMuted: boolean = false;
@@ -148,20 +163,26 @@ export class UltravoxSession extends EventTarget {
    * Constructor for UltravoxSession.
    * @param audioContext An AudioContext to use for audio processing. If not provided, a new AudioContext will be created.
    * @param additionalMessages A set of additional message types to enable. Empty by default.
+   * @param rtcConfig An RTCConfiguration applied to the call's WebRTC connections. For example,
+   *     setting {iceTransportPolicy: 'relay'} forces media through a TURN relay (typically over
+   *     TCP/TLS on port 443), which can help on networks that disrupt long-lived UDP flows.
    */
   constructor({
     audioContext,
     additionalMessages,
     videoElement,
+    rtcConfig,
   }: {
     audioContext?: AudioContext;
     additionalMessages?: Set<string>;
     videoElement?: HTMLVideoElement;
+    rtcConfig?: RTCConfiguration;
   } = {}) {
     super();
     this.audioContext = audioContext || new AudioContext();
     this.additionalMessages = additionalMessages || new Set();
     this.videoElement = videoElement;
+    this.rtcConfig = rtcConfig;
   }
 
   /** Returns all transcripts for the current session. */
@@ -330,20 +351,25 @@ export class UltravoxSession extends EventTarget {
     this.room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant: any) =>
       this.handleDataReceived(payload, participant),
     );
+    this.room.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => this.handleRoomDisconnected(reason));
 
     this.audioContext.resume();
     this.audioElement.play();
 
-    const [track, _] = await Promise.all([createLocalAudioTrack(), this.room.connect(msg.roomUrl, msg.token)]);
+    const [track, _] = await Promise.all([
+      createLocalAudioTrack(),
+      this.room.connect(msg.roomUrl, msg.token, { rtcConfig: this.rtcConfig }),
+    ]);
+    if (this.isStopped()) {
+      // We've been stopped while waiting for the mic permission (during createLocalTracks).
+      // The track must be stopped here to end audio capture: disconnect() ran before it existed.
+      track.stop();
+      return;
+    }
     this.localAudioTrack = track;
     this.localAudioTrack.setAudioContext(this.audioContext);
     if (this.isMicMuted) {
       this.localAudioTrack.mute();
-    }
-
-    if ([UltravoxSessionStatus.DISCONNECTED, UltravoxSessionStatus.DISCONNECTING].includes(this.status)) {
-      // We've been stopped while waiting for the mic permission (during createLocalTracks).
-      return;
     }
     if (this.localAudioTrack.mediaStream) {
       this.micSourceNode = this.audioContext.createMediaStreamSource(this.localAudioTrack.mediaStream);
@@ -354,10 +380,56 @@ export class UltravoxSession extends EventTarget {
   }
 
   private async handleSocketClose(event: CloseEvent) {
+    if (this.isStopped()) {
+      return;
+    }
+    const socketClosedNormally = event.wasClean && (event.code === 1000 || event.code === 1005);
+    const roomState = this.room?.state;
+    if (!socketClosedNormally) {
+      this.dispatchEvent(
+        new UltravoxErrorEvent(
+          new Error(`Session socket closed abnormally. code=${event.code} reason=${event.reason}`),
+        ),
+      );
+    } else if (roomState === ConnectionState.Reconnecting || roomState === ConnectionState.SignalReconnecting) {
+      // The server ended the call while we were trying to recover the call's media connection,
+      // meaning the call was cut short by a network failure rather than ending normally.
+      this.dispatchEvent(new UltravoxErrorEvent(new Error('Call ended due to unstable media connection')));
+    }
     await this.disconnect();
   }
 
-  private async disconnect() {
+  private async handleRoomDisconnected(reason?: DisconnectReason) {
+    if (this.isStopped()) {
+      return;
+    }
+    if (reason !== DisconnectReason.CLIENT_INITIATED) {
+      // The server ends calls by closing our socket, not by closing the room, so a room disconnect
+      // we didn't initiate means the media connection was lost. (An undefined reason means LiveKit
+      // exhausted its internal reconnect attempts.) The call cannot continue without media, so we
+      // surface the failure and hang up rather than leaving the session in a stale "live" state.
+      const reasonName = reason === undefined ? 'reconnect attempts exhausted' : (DisconnectReason[reason] ?? reason);
+      this.dispatchEvent(new UltravoxErrorEvent(new Error(`Call media connection lost unexpectedly (${reasonName})`)));
+    }
+    await this.disconnect();
+  }
+
+  private isStopped(): boolean {
+    return [UltravoxSessionStatus.DISCONNECTING, UltravoxSessionStatus.DISCONNECTED].includes(this._status);
+  }
+
+  private disconnect(): Promise<void> {
+    if (this._status === UltravoxSessionStatus.DISCONNECTED) {
+      return Promise.resolve();
+    }
+    // Reuse any in-flight teardown so that concurrent callers resolve only once it completes.
+    this.disconnectPromise ??= this.performDisconnect().finally(() => {
+      this.disconnectPromise = undefined;
+    });
+    return this.disconnectPromise;
+  }
+
+  private async performDisconnect() {
     this.setStatus(UltravoxSessionStatus.DISCONNECTING);
     this.localAudioTrack?.stop();
     this.localAudioTrack = undefined;
