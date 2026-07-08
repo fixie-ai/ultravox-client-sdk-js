@@ -392,9 +392,7 @@ export class UltravoxSession extends EventTarget {
     } else if (roomState === ConnectionState.Reconnecting || roomState === ConnectionState.SignalReconnecting) {
       // The server ended the call while we were trying to recover the call's media connection,
       // meaning the call was cut short by a network failure rather than ending normally.
-      this.dispatchEvent(
-        new UltravoxErrorEvent(new Error('Call ended while the media connection was attempting to reconnect')),
-      );
+      this.dispatchEvent(new UltravoxErrorEvent(new Error('Call ended due to unstable media connection')));
     }
     await this.disconnect();
   }
