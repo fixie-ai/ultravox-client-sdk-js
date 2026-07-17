@@ -41,6 +41,30 @@ export enum Medium {
   TEXT = 'text',
 }
 
+/* How soon the agent should respond to a message sent via sendText. */
+export enum TextMessageUrgency {
+  /* Start a new response immediately, even if the agent is speaking. */
+  IMMEDIATE = 'immediate',
+  /* Don't interrupt the agent, but respond at the next opportunity. This is the default. */
+  SOON = 'soon',
+  /* Don't force a response. The message will be considered whenever the agent next responds. */
+  LATER = 'later',
+}
+
+/* Where a message sent via sendText should be placed if the user is speaking when it is received. */
+export enum TextMessagePlacement {
+  /* Place the message before any active (i.e. not-yet-responded-to) user speech. This is the default. */
+  BEFORE = 'before',
+  /* Place the message after the most recent pause in active user speech. */
+  PREVIOUS_PAUSE = 'previous_pause',
+}
+
+/* Options for messages sent via sendText. */
+export interface SendTextOptions {
+  urgency?: TextMessageUrgency;
+  placement?: TextMessagePlacement;
+}
+
 /* How the agent should proceed after a tool invocation. */
 export enum AgentReaction {
   /* The agent should speak after the tool invocation. This is the default and is recommended for tools that retrieve information for the agent to act on. */
@@ -129,7 +153,10 @@ export type ClientToolImplementation = (parameters: {
  *
  * - status: The status of the session has changed.
  * - transcripts: A transcript was added or updated.
- * - experimental_message: An experimental message was received. The message is included in the event.
+ * - data_message: A data message was received. The message is included in the event, and calling
+ *   preventDefault() on the event suppresses this SDK's default handling of the message.
+ * - error: The session ended unexpectedly. The error is included in the event.
+ * - video_track_subscribed: The agent published a video track. The video element is included in the event.
  *
  */
 export class UltravoxSession extends EventTarget {
@@ -148,7 +175,9 @@ export class UltravoxSession extends EventTarget {
   private videoElement?: HTMLVideoElement;
   private audioElement = new Audio();
   private localAudioTrack?: LocalAudioTrack;
-  private micSourceNode?: MediaStreamAudioSourceNode;
+  private agentAudioTrack?: RemoteAudioTrack;
+  private _micSourceNode?: MediaStreamAudioSourceNode;
+  private _agentSourceNode?: MediaStreamAudioSourceNode;
   private readonly textDecoder = new TextDecoder();
   private readonly textEncoder = new TextEncoder();
 
@@ -212,6 +241,36 @@ export class UltravoxSession extends EventTarget {
   }
 
   /**
+   * An AudioNode producing the user's (microphone) audio, for example for attaching an
+   * AnalyserNode to drive a speech indicator. The node belongs to the session's AudioContext
+   * (which can be provided to the constructor). Undefined until the call's mic audio exists,
+   * typically shortly after the call connects (or after the user grants mic permission).
+   */
+  get micSourceNode(): MediaStreamAudioSourceNode | undefined {
+    // Built from mediaStreamTrack rather than the track's mediaStream because the latter is
+    // internal to livekit-client.
+    const track = this.localAudioTrack?.mediaStreamTrack;
+    if (!this._micSourceNode && track) {
+      this._micSourceNode = this.audioContext.createMediaStreamSource(new MediaStream([track]));
+    }
+    return this._micSourceNode;
+  }
+
+  /**
+   * An AudioNode producing the agent's audio, for example for attaching an AnalyserNode to
+   * drive a speech indicator. The node belongs to the session's AudioContext (which can be
+   * provided to the constructor). Undefined until the call's agent audio exists, typically
+   * shortly after the call connects.
+   */
+  get agentSourceNode(): MediaStreamAudioSourceNode | undefined {
+    const track = this.agentAudioTrack?.mediaStreamTrack;
+    if (!this._agentSourceNode && track) {
+      this._agentSourceNode = this.audioContext.createMediaStreamSource(new MediaStream([track]));
+    }
+    return this._agentSourceNode;
+  }
+
+  /**
    * Registers a client tool implementation with the given name. If the call is
    * started with a client-implemented tool, this implementation will be invoked
    * when the model calls the tool.
@@ -233,6 +292,12 @@ export class UltravoxSession extends EventTarget {
   joinCall(joinUrl: string, clientVersion?: string): void {
     if (this._status !== UltravoxSessionStatus.DISCONNECTED) {
       throw new Error('Cannot join a new call while already in a call');
+    }
+    // Clear any previous call's transcripts in case this session instance is being reused,
+    // notifying listeners that may be rendering them.
+    if (this._transcripts.length > 0) {
+      this._transcripts.length = 0;
+      this.dispatchEvent(new UltravoxTranscriptsChangedEvent());
     }
     const url = new URL(joinUrl);
     let uvClientVersion = `web_${ULTRAVOX_SDK_VERSION}`;
@@ -267,25 +332,55 @@ export class UltravoxSession extends EventTarget {
     this.sendData({ type: 'set_output_medium', medium });
   }
 
-  /** Sends a message via text. */
-  sendText(text: string, deferResponse?: boolean) {
+  /**
+   * Sends a user message via text. When omitted, urgency defaults to SOON and placement to
+   * BEFORE (applied server-side).
+   */
+  sendText(text: string, options?: SendTextOptions): void;
+  /** @deprecated Use SendTextOptions instead. deferResponse maps to urgency LATER (true) or IMMEDIATE (false). */
+  sendText(text: string, deferResponse?: boolean): void;
+  sendText(text: string, optionsOrDeferResponse?: SendTextOptions | boolean) {
     if (!UltravoxSession.CONNECTED_STATUSES.has(this._status)) {
       throw new Error(`Cannot send text while not connected. Current status is ${this._status}.`);
     }
-    this.sendData({ type: 'input_text_message', text, deferResponse });
+    if (typeof optionsOrDeferResponse === 'boolean') {
+      const urgency = optionsOrDeferResponse ? TextMessageUrgency.LATER : TextMessageUrgency.IMMEDIATE;
+      this.sendData({ type: 'user_text_message', text, urgency });
+      return;
+    }
+    this.sendData({
+      type: 'user_text_message',
+      text,
+      urgency: optionsOrDeferResponse?.urgency,
+      placement: optionsOrDeferResponse?.placement,
+    });
   }
 
-  /* Sends an arbitrary data message to the server. See https://docs.ultravox.ai/datamessages for message types. */
+  /**
+   * Sends an arbitrary data message to the server. See https://docs.ultravox.ai/datamessages
+   * for message types. If the call's transports are unavailable (before the call is joined or
+   * after it ends), the message is dropped with a console warning.
+   */
   sendData(obj: any) {
-    if (obj.type == undefined) {
+    if (obj?.type == undefined) {
       throw new Error('Data must have a type field');
+    }
+    // The socket exists from joinCall on and the room exists from the server's room_info
+    // response on, so requiring both keeps behavior independent of which transport the size
+    // check below happens to pick. Undeliverable messages warn rather than throw: the loss is
+    // typically visible through other means (call events, transcripts, etc.), and a throw
+    // would punish fire-and-forget callers more than it would help.
+    if (!this.room || !this.socket) {
+      console.warn(`Dropping '${obj.type}' data message while not connected. Current status is ${this._status}.`);
+      return;
     }
     const msgStr = JSON.stringify(obj);
     const msgBytes = this.textEncoder.encode(msgStr);
     if (msgBytes.length > 1024) {
-      this.socket?.send(msgStr);
+      // Messages that could exceed the WebRTC data channel's practical size limit go via websocket.
+      this.socket.send(msgStr);
     } else {
-      this.room?.localParticipant.publishData(msgBytes, { reliable: true });
+      this.room.localParticipant.publishData(msgBytes, { reliable: true });
     }
   }
 
@@ -340,7 +435,20 @@ export class UltravoxSession extends EventTarget {
   }
 
   private async handleSocketMessage(event: MessageEvent) {
+    if (this.isStopped()) {
+      // A message already queued when leaveCall closed the socket can still be dispatched. If
+      // it were the room_info message, proceeding would prompt for mic permission and connect
+      // a room that teardown (already finished) would never disconnect.
+      return;
+    }
     const msg = JSON.parse(event.data);
+    if (this.room) {
+      // The first socket message contains room info. The server sends nothing else over the
+      // socket today, but any later message would be an ordinary data message (mirroring how
+      // this client sends its large data messages over the socket).
+      this.handleDataMessage(msg);
+      return;
+    }
     this.room = new Room({ webAudioMix: false });
     this.room.on(RoomEvent.TrackSubscribed, (_track, publication) => {
       if (publication.kind == Track.Kind.Audio) {
@@ -353,8 +461,11 @@ export class UltravoxSession extends EventTarget {
     );
     this.room.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => this.handleRoomDisconnected(reason));
 
-    this.audioContext.resume();
-    this.audioElement.play();
+    // Both calls reject if the browser is blocking audio pending a user gesture. Audio will
+    // remain blocked until the integrator resumes it after a gesture, but that's not fatal to
+    // the call itself (and is the integrator's responsibility to avoid or handle).
+    this.audioContext.resume()?.catch(() => {});
+    this.audioElement.play()?.catch(() => {});
 
     const [track, _] = await Promise.all([
       createLocalAudioTrack(),
@@ -370,9 +481,6 @@ export class UltravoxSession extends EventTarget {
     this.localAudioTrack.setAudioContext(this.audioContext);
     if (this.isMicMuted) {
       this.localAudioTrack.mute();
-    }
-    if (this.localAudioTrack.mediaStream) {
-      this.micSourceNode = this.audioContext.createMediaStreamSource(this.localAudioTrack.mediaStream);
     }
 
     const opts = { name: 'audio', simulcast: false, source: Track.Source.Microphone };
@@ -431,14 +539,23 @@ export class UltravoxSession extends EventTarget {
 
   private async performDisconnect() {
     this.setStatus(UltravoxSessionStatus.DISCONNECTING);
-    this.localAudioTrack?.stop();
+    // A failure to tear down one resource must not prevent tearing down the others (or leave
+    // the session stuck short of DISCONNECTED), so the fallible steps are individually guarded.
+    try {
+      this.localAudioTrack?.stop();
+    } catch {}
     this.localAudioTrack = undefined;
-    await this.room?.disconnect();
+    try {
+      await this.room?.disconnect();
+    } catch {}
     this.room = undefined;
     this.socket?.close();
     this.socket = undefined;
-    this.micSourceNode?.disconnect();
-    this.micSourceNode = undefined;
+    this._micSourceNode?.disconnect();
+    this._micSourceNode = undefined;
+    this._agentSourceNode?.disconnect();
+    this._agentSourceNode = undefined;
+    this.agentAudioTrack = undefined;
     this.videoElement?.pause();
     this.audioElement.pause();
     this.audioElement.srcObject = null;
@@ -455,6 +572,13 @@ export class UltravoxSession extends EventTarget {
     } else if (track.kind === 'audio') {
       const audioTrack = track as RemoteAudioTrack;
       audioTrack.attach(this.audioElement);
+      if (this.agentAudioTrack !== audioTrack) {
+        // A new track (e.g. after a full media reconnect) means a cached source node is bound
+        // to a dead stream, so it must be recreated on next access.
+        this._agentSourceNode?.disconnect();
+        this._agentSourceNode = undefined;
+      }
+      this.agentAudioTrack = audioTrack;
     }
   }
 
@@ -467,7 +591,15 @@ export class UltravoxSession extends EventTarget {
   }
 
   private handleDataReceived(payload: Uint8Array, _participant: any) {
-    const msg = JSON.parse(this.textDecoder.decode(payload));
+    this.handleDataMessage(JSON.parse(this.textDecoder.decode(payload)));
+  }
+
+  private handleDataMessage(msg: any) {
+    if (this.isStopped()) {
+      // Late messages can still be delivered while teardown is in flight (room.disconnect is
+      // async), and must not resurrect the session by mutating its status or transcripts.
+      return;
+    }
     const runDefault = this.dispatchEvent(new UltravoxDataMessageEvent(msg));
     if (runDefault) {
       if (msg.type === 'state') {

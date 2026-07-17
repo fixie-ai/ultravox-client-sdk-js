@@ -17,7 +17,7 @@ session.joinCall('wss://your-call-join-url');
 session.leaveCall();
 ```
 
-_Note: Join URL's are created using the Ultravox API. See the [docs](https://docs.fixie.ai) for more info._
+_Note: Join URLs are created using the Ultravox API. See the [docs](https://docs.ultravox.ai) for more info._
 
 ## Events
 
@@ -78,21 +78,56 @@ Transcripts are an array of transcript objects. Each transcript has the followin
 | isFinal  | boolean | True if the transcript represents a complete utterance. False if it is a fragment of an utterance that is still underway. |
 | speaker  | Role    | Either "user" or "agent". Denotes who was speaking.                                                                       |
 | medium   | Medium  | Either "voice" or "text". Denotes how the message was sent.                                                               |
+| ordinal  | number  | The position of the message within the call, for sorting.                                                                 |
+
+## Sending Text
+
+Text can be sent to the agent during a call:
+
+```javascript
+import { TextMessageUrgency } from 'ultravox-client';
+
+session.sendText('Show me my order history');
+
+// Urgency controls how soon the agent responds: IMMEDIATE (interrupt the agent if it is
+// speaking), SOON (respond at the next opportunity, the default), or LATER (don't force a
+// response; the message is simply included the next time the agent responds).
+session.sendText('The user tapped the checkout button', { urgency: TextMessageUrgency.LATER });
+```
+
+Arbitrary [data messages](https://docs.ultravox.ai/datamessages) can also be sent with
+`session.sendData(message)`, and every data message received after the call connects is emitted
+as a `data_message` event on the session (calling `preventDefault()` on that event suppresses
+the SDK's default handling of the message).
+
+## Speech Indicators and Audio Analysis
+
+The session exposes Web Audio source nodes for both sides of the conversation, for example for
+attaching an `AnalyserNode` to drive speech indicators. Both are undefined until the relevant
+audio exists — typically shortly after the call connects (and, for the mic, after the user grants
+permission). The nodes belong to the session's `AudioContext`, and Web Audio nodes from different
+contexts cannot be connected, so provide the context yourself when you want to attach your own
+nodes:
+
+```javascript
+const audioContext = new AudioContext();
+const session = new UltravoxSession({ audioContext });
+
+// Then, once the call's audio is flowing:
+const analyser = audioContext.createAnalyser();
+session.agentSourceNode?.connect(analyser); // Or micSourceNode for the user's audio.
+```
+
+Note that the nodes produce data only while the `AudioContext` is running; if the browser blocked
+audio pending a user gesture, resume the context after the next gesture.
 
 ## Testing SDK Versions
 
-This repo includes a basic example application that can be used with the SDK. The example application requires running a local web server:
+This repo includes a basic example application that can be used with the SDK. It always runs
+against the SDK built from your local checkout:
 
 ```bash
 pnpm serve-example
 ```
 
 Then navigate your browser to `http://localhost:8080/example/` and use the example.
-
-### Missing version.js file
-
-If build fails because it cannot find './version.js', run the following:
-
-```bash
-pnpm publish --dry-run --git-checks=false
-```

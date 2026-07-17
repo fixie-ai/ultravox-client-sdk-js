@@ -7,35 +7,37 @@ class UltravoxExample {
     this.setUpEventListeners();
   }
 
-  appendUpdate(target, message) {
-    const updateTarget = document.getElementById(target);
+  updateStatus(message) {
+    document.getElementById('callStatus').textContent = `Call Status: ${message}`;
+  }
 
-    if (target === 'callTranscript') {
-      let transcriptText = '';
-      message.forEach((transcript, index) => {
-        if (transcript.speaker === 'agent') {
-          transcriptText += '<p>' + transcript.speaker + ': ' + transcript.text + '</p>';
-        }
-      });
-      updateTarget.innerHTML = transcriptText;
-      updateTarget.scrollTop = updateTarget.scrollHeight;
-    } else {
-      updateTarget.innerHTML = `<p>Call Status: ${message}</p>`;
-    }
+  renderTranscripts() {
+    // The session's transcripts array is the source of truth: it already merges partial
+    // utterances and is emptied when the session is reused for a new call, so rendering it
+    // wholesale keeps this display correct without tracking any state here.
+    const container = document.getElementById('callTranscript');
+    container.replaceChildren(
+      ...this.uvSession.transcripts.map((transcript) => {
+        const paragraph = document.createElement('p');
+        paragraph.textContent = `${transcript.speaker}: ${transcript.text}`;
+        return paragraph;
+      }),
+    );
+    container.scrollTop = container.scrollHeight;
   }
 
   setUpEventListeners() {
     // Set up session event listeners
-    this.uvSession.addEventListener('status', (event) => {
-      this.appendUpdate('callStatus', `Session status changed: ${this.uvSession.status}`);
+    this.uvSession.addEventListener('status', () => {
+      this.updateStatus(`Session status changed: ${this.uvSession.status}`);
     });
 
-    this.uvSession.addEventListener('transcripts', (event) => {
-      this.appendUpdate('callTranscript', this.uvSession.transcripts);
+    this.uvSession.addEventListener('transcripts', () => {
+      this.renderTranscripts();
     });
 
     this.uvSession.addEventListener('error', (event) => {
-      this.appendUpdate('callStatus', `Session ended unexpectedly: ${event.error.message}`);
+      this.updateStatus(`Session ended unexpectedly: ${event.error.message}`);
     });
 
     this.uvSession.addEventListener('video_track_subscribed', (event) => {
@@ -46,7 +48,7 @@ class UltravoxExample {
       videoElement.style.right = '0';
       videoElement.style.width = '600px';
       document.body.appendChild(videoElement);
-      this.appendUpdate('callStatus', 'Video track subscribed');
+      this.updateStatus('Video track subscribed');
     });
 
     // Set up button click handlers
@@ -57,18 +59,18 @@ class UltravoxExample {
   startCall = async () => {
     const joinUrl = document.getElementById('joinUrl').value;
     if (!joinUrl) {
-      this.appendUpdate('callStatus', 'Please enter a valid join URL');
+      this.updateStatus('Please enter a valid join URL');
       return;
     }
 
-    this.appendUpdate('callStatus', 'Starting call');
+    this.updateStatus('Starting call');
     this.uvSession.registerToolImplementation('getSecretMenu', this.getSecretMenu);
     this.uvSession.joinCall(joinUrl);
-    this.appendUpdate('callStatus', `Joining call: ${this.uvSession.status}`);
+    this.updateStatus(`Joining call: ${this.uvSession.status}`);
   };
 
   endCall = async () => {
-    this.appendUpdate('callStatus', 'Ending call');
+    this.updateStatus('Ending call');
     this.uvSession.leaveCall();
   };
 

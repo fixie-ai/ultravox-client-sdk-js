@@ -17,8 +17,6 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      # src/version.ts is gitignored but needed by the tshy build that runs on install.
-      - run: pnpm run prepublishOnly
       - run: pnpm install --frozen-lockfile
       - run: pnpm run format:check
       - run: pnpm exec tsc --noEmit
