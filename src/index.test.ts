@@ -362,6 +362,16 @@ test('sendData warns and drops messages before the room exists, regardless of me
   expect(FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!.sent).toEqual([]);
 });
 
+test('data messages arriving after the call ends are ignored', async () => {
+  const { session, room } = await joinConnectedCall();
+  await session.leaveCall();
+  const messages: any[] = [];
+  session.addEventListener('data_message', (event) => messages.push((event as UltravoxDataMessageEvent).message));
+  receiveDataMessage(room, { type: 'state', state: 'listening' });
+  expect(session.status).toBe(UltravoxSessionStatus.DISCONNECTED);
+  expect(messages).toEqual([]);
+});
+
 test('handles data messages arriving over the socket', async () => {
   const { session, socket } = await joinCall();
   socket.onmessage!({ data: JSON.stringify({ type: 'state', state: 'listening' }) });
@@ -572,7 +582,10 @@ test('a session can be reused for a new call with fresh transcripts', async () =
   const { session, room } = await joinConnectedCall();
   receiveDataMessage(room, { type: 'transcript', role: 'user', medium: 'text', ordinal: 0, final: true, text: 'Hi' });
   await session.leaveCall();
+  let transcriptsEvents = 0;
+  session.addEventListener('transcripts', () => transcriptsEvents++);
   session.joinCall('wss://example.test/join');
+  expect(transcriptsEvents).toBe(1); // Listeners must be told the old call's transcripts were cleared.
   const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
   socket.onmessage!({ data: JSON.stringify({ roomUrl: 'wss://room.example.test', token: 'token' }) });
   await vi.waitFor(() => expect(FakeRoom.instances[FakeRoom.instances.length - 1]?.state).toBe('connected'));

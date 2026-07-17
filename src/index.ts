@@ -293,8 +293,12 @@ export class UltravoxSession extends EventTarget {
     if (this._status !== UltravoxSessionStatus.DISCONNECTED) {
       throw new Error('Cannot join a new call while already in a call');
     }
-    // Clear any previous call's transcripts in case this session instance is being reused.
-    this._transcripts.length = 0;
+    // Clear any previous call's transcripts in case this session instance is being reused,
+    // notifying listeners that may be rendering them.
+    if (this._transcripts.length > 0) {
+      this._transcripts.length = 0;
+      this.dispatchEvent(new UltravoxTranscriptsChangedEvent());
+    }
     const url = new URL(joinUrl);
     let uvClientVersion = `web_${ULTRAVOX_SDK_VERSION}`;
     if (clientVersion) {
@@ -354,8 +358,8 @@ export class UltravoxSession extends EventTarget {
 
   /**
    * Sends an arbitrary data message to the server. See https://docs.ultravox.ai/datamessages
-   * for message types. If the session is not connected, the message is dropped with a console
-   * warning.
+   * for message types. If the call's transports are unavailable (before the call is joined or
+   * after it ends), the message is dropped with a console warning.
    */
   sendData(obj: any) {
     if (obj.type == undefined) {
@@ -585,6 +589,11 @@ export class UltravoxSession extends EventTarget {
   }
 
   private handleDataMessage(msg: any) {
+    if (this.isStopped()) {
+      // Late messages can still be delivered while teardown is in flight (room.disconnect is
+      // async), and must not resurrect the session by mutating its status or transcripts.
+      return;
+    }
     const runDefault = this.dispatchEvent(new UltravoxDataMessageEvent(msg));
     if (runDefault) {
       if (msg.type === 'state') {
