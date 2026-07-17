@@ -17,7 +17,7 @@ session.joinCall('wss://your-call-join-url');
 session.leaveCall();
 ```
 
-_Note: Join URL's are created using the Ultravox API. See the [docs](https://docs.ultravox.ai) for more info._
+_Note: Join URLs are created using the Ultravox API. See the [docs](https://docs.ultravox.ai) for more info._
 
 ## Events
 
@@ -123,18 +123,11 @@ audio pending a user gesture, resume the context after the next gesture.
 
 ## Testing SDK Versions
 
-This repo includes a basic example application that can be used with the SDK. The example application requires running a local web server:
+This repo includes a basic example application that can be used with the SDK. It always runs
+against the SDK built from your local checkout:
 
 ```bash
 pnpm serve-example
 ```
 
 Then navigate your browser to `http://localhost:8080/example/` and use the example.
-
-### Missing version.js file
-
-If build fails because it cannot find './version.js', run the following:
-
-```bash
-pnpm publish --dry-run --git-checks=false
-```

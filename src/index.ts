@@ -362,7 +362,7 @@ export class UltravoxSession extends EventTarget {
    * after it ends), the message is dropped with a console warning.
    */
   sendData(obj: any) {
-    if (obj.type == undefined) {
+    if (obj?.type == undefined) {
       throw new Error('Data must have a type field');
     }
     // The socket exists from joinCall on and the room exists from the server's room_info

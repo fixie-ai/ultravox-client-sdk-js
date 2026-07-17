@@ -18,12 +18,12 @@
     }
   },
   "scripts": {
-    "prepublishOnly": "node -p \"'export const ULTRAVOX_SDK_VERSION = ' + JSON.stringify(require('./package.json').version) + ';'\" > src/version.ts",
+    "gen-version": "node -p \"'export const ULTRAVOX_SDK_VERSION = ' + JSON.stringify(require('./package.json').version) + ';'\" > src/version.ts",
     "build": "pnpm run prepare && pnpm run format",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "tshy",
-    "serve-example": "http-server",
+    "prepare": "pnpm run gen-version && tshy",
+    "serve-example": "pnpm run prepare && http-server",
     "test": "vitest run"
   },
   "dependencies": {

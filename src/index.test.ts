@@ -334,10 +334,13 @@ test('sendData routes messages over 1KB via the socket', async () => {
   expect(socket.sent.map((sent) => JSON.parse(sent))).toEqual([message]);
 });
 
-test('sendData requires a type field', async () => {
-  const { session } = await joinConnectedCall();
-  expect(() => session.sendData({ text: 'Hello' })).toThrow('type');
-});
+test.each([{ data: { text: 'Hello' } }, { data: null }, { data: undefined }])(
+  'sendData rejects data without a type field ($data)',
+  async ({ data }) => {
+    const { session } = await joinConnectedCall();
+    expect(() => session.sendData(data)).toThrow('type');
+  },
+);
 
 test.each([
   { name: 'small (room-bound)', message: { type: 'ping', timestamp: 1 } },
