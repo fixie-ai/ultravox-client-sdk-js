@@ -435,6 +435,12 @@ export class UltravoxSession extends EventTarget {
   }
 
   private async handleSocketMessage(event: MessageEvent) {
+    if (this.isStopped()) {
+      // A message already queued when leaveCall closed the socket can still be dispatched. If
+      // it were the room_info message, proceeding would prompt for mic permission and connect
+      // a room that teardown (already finished) would never disconnect.
+      return;
+    }
     const msg = JSON.parse(event.data);
     if (this.room) {
       // The first socket message contains room info. The server sends nothing else over the

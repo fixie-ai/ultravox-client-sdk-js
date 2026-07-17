@@ -365,6 +365,16 @@ test('sendData warns and drops messages before the room exists, regardless of me
   expect(FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!.sent).toEqual([]);
 });
 
+test('room_info arriving after the call ends does not start a room or request the mic', async () => {
+  const session = new UltravoxSession({ audioContext: {} as AudioContext });
+  session.joinCall('wss://example.test/join');
+  await session.leaveCall();
+  const socket = FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+  socket.onmessage!({ data: JSON.stringify({ roomUrl: 'wss://room.example.test', token: 'token' }) });
+  expect(FakeRoom.instances).toEqual([]);
+  expect(micTracks).toEqual([]);
+});
+
 test('data messages arriving after the call ends are ignored', async () => {
   const { session, room } = await joinConnectedCall();
   await session.leaveCall();
