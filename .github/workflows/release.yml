@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Allows npm to authenticate this workflow via OIDC (trusted publishing), so no npm
+      # token is stored anywhere. Configured on npmjs.com under the package's Settings.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - name: Verify the release tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$version" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "package.json version ($version) does not match release tag ($GITHUB_REF_NAME)"
+            exit 1
+          fi
+      # Node 22 bundles npm 10, which predates trusted publishing support (npm 11.5.1).
+      - run: npm install -g npm@latest
+      - run: npm publish
