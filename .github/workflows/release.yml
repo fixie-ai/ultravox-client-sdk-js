@@ -7,8 +7,8 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Gated by the "release" environment's protection rules (reviewer approval and a tag name
-    # pattern), and npm's trusted publisher config requires this environment in its OIDC claims.
+    # Applies the "release" environment's protection rules. npm's trusted publisher config
+    # also requires this environment, so removing it breaks publishing outright.
     environment: release
     permissions:
       contents: read
@@ -22,8 +22,7 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          # Trusted publishing requires npm >= 11.5.1; node 26 bundles a new enough npm,
-          # while node 22 was still on npm 10.
+          # Must bundle npm >= 11.5.1 for trusted publishing.
           node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
