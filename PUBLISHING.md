@@ -16,6 +16,12 @@ To publish a new version:
    `package.json` (e.g. `0.6.0`); publishing the release triggers the workflow, which runs the
    tests and publishes to npm.
 
+Beta releases use the same flow: give `package.json` a prerelease version (e.g. `0.7.0-beta.1`)
+and check **Set as a pre-release** on the GitHub release. The workflow publishes prereleases
+under the `beta` dist-tag (installable via `ultravox-client@beta`) so a normal
+`npm install ultravox-client` never resolves to them, and it refuses to publish if the
+pre-release checkbox and the version's prerelease suffix disagree.
+
 ### One-time setup
 
 The workflow works because of two pieces of configuration:

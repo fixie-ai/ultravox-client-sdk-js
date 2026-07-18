@@ -35,4 +35,14 @@ jobs:
             echo "package.json version ($version) does not match release tag ($GITHUB_REF_NAME)"
             exit 1
           fi
-      - run: npm publish
+          # A mismatch here would either hide a stable release under the beta dist-tag or,
+          # worse, serve a prerelease to everyone installing the package normally.
+          case "$version" in
+            *-*) [ "$PRERELEASE" = "true" ] || { echo "Version $version has a prerelease suffix, so the GitHub release must be marked as a pre-release"; exit 1; } ;;
+            *) [ "$PRERELEASE" = "false" ] || { echo "The GitHub release is marked as a pre-release, but version $version has no prerelease suffix"; exit 1; } ;;
+          esac
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
+      # Pre-releases go under the "beta" dist-tag so that a plain `npm install ultravox-client`
+      # never resolves to them. Install with `npm install ultravox-client@beta` instead.
+      - run: npm publish --tag "${{ github.event.release.prerelease && 'beta' || 'latest' }}"
