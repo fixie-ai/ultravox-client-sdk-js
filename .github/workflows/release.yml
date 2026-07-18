@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Applies the "release" environment's protection rules. npm's trusted publisher config
+    # also requires this environment, so removing it breaks publishing outright.
+    environment: release
+    permissions:
+      contents: read
+      # Allows npm to authenticate this workflow via OIDC (trusted publishing), so no npm
+      # token is stored anywhere. Configured on npmjs.com under the package's Settings.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          # Must bundle npm >= 11.5.1 for trusted publishing.
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - name: Verify the release tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$version" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "package.json version ($version) does not match release tag ($GITHUB_REF_NAME)"
+            exit 1
+          fi
+          # A mismatch here would either hide a stable release under the beta dist-tag or,
+          # worse, serve a prerelease to everyone installing the package normally.
+          case "$version" in
+            *-*) [ "$PRERELEASE" = "true" ] || { echo "Version $version has a prerelease suffix, so the GitHub release must be marked as a pre-release"; exit 1; } ;;
+            *) [ "$PRERELEASE" = "false" ] || { echo "The GitHub release is marked as a pre-release, but version $version has no prerelease suffix"; exit 1; } ;;
+          esac
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
+      # Pre-releases go under the "beta" dist-tag so that a plain `npm install ultravox-client`
+      # never resolves to them. Install with `npm install ultravox-client@beta` instead.
+      #
+      # npm rather than pnpm here on purpose: the npm CLI is the reference client for trusted
+      # publishing (pnpm reimplements the OIDC exchange and has had regressions, e.g.
+      # https://github.com/pnpm/pnpm/issues/11513), while pnpm's publish-time extras don't
+      # apply to this standalone package (no workspace deps to rewrite) and its git checks
+      # would reject the detached-tag checkout releases run from.
+      - run: npm publish --tag "${{ github.event.release.prerelease && 'beta' || 'latest' }}"
