@@ -19,7 +19,9 @@ jobs:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Trusted publishing requires npm >= 11.5.1; node 26 bundles a new enough npm,
+          # while node 22 was still on npm 10.
+          node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
@@ -30,6 +32,4 @@ jobs:
             echo "package.json version ($version) does not match release tag ($GITHUB_REF_NAME)"
             exit 1
           fi
-      # Node 22 bundles npm 10, which predates trusted publishing support (npm 11.5.1).
-      - run: npm install -g npm@latest
       - run: npm publish
