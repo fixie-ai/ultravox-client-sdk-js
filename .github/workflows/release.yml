@@ -44,4 +44,10 @@ jobs:
           PRERELEASE: ${{ github.event.release.prerelease }}
       # Pre-releases go under the "beta" dist-tag so that a plain `npm install ultravox-client`
       # never resolves to them. Install with `npm install ultravox-client@beta` instead.
+      #
+      # npm rather than pnpm here on purpose: the npm CLI is the reference client for trusted
+      # publishing (pnpm reimplements the OIDC exchange and has had regressions, e.g.
+      # https://github.com/pnpm/pnpm/issues/11513), while pnpm's publish-time extras don't
+      # apply to this standalone package (no workspace deps to rewrite) and its git checks
+      # would reject the detached-tag checkout releases run from.
       - run: npm publish --tag "${{ github.event.release.prerelease && 'beta' || 'latest' }}"
