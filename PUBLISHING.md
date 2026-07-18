@@ -18,6 +18,14 @@ To publish a new version:
 
 ### One-time setup
 
-The workflow works because this repository is configured as a trusted publisher for the package
-on npmjs.com: package **Settings** → **Trusted Publisher** → GitHub Actions, with organization
-`fixie-ai`, repository `ultravox-client-sdk-js`, and workflow filename `release.yml`.
+The workflow works because of two pieces of configuration:
+
+- This repository is configured as a trusted publisher for the package on npmjs.com: package
+  **Settings** → **Trusted Publisher** → GitHub Actions, with organization `fixie-ai`,
+  repository `ultravox-client-sdk-js`, workflow filename `release.yml`, and environment
+  `release`.
+- The repository has a `release` environment (repo **Settings** → **Environments**) whose
+  protection rules require reviewer approval, so every publish needs an explicit human
+  sign-off even when the release was created by an authorized account. Its deployment tag
+  pattern (`[0-9]*.[0-9]*.[0-9]*`, Ruby `File.fnmatch` syntax) limits which refs may deploy;
+  note that release-triggered runs match against the _tag_, not a branch.

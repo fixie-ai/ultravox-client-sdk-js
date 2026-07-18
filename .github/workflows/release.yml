@@ -7,6 +7,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Gated by the "release" environment's protection rules (reviewer approval and a tag name
+    # pattern), and npm's trusted publisher config requires this environment in its OIDC claims.
+    environment: release
     permissions:
       contents: read
       # Allows npm to authenticate this workflow via OIDC (trusted publishing), so no npm
